@@ -1,0 +1,39 @@
+{
+  "name": "@deepseek-ai/dsh-quest-journal",
+  "description": "Quest Journal: an RPG-style task journal (Quest → Objective → Step) with attachments, trace history, archiving, Agent tools, and a self-hosted web panel backend.",
+  "version": "0.4.0",
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./web": "./lib/web-entry.js",
+    "./tools": "./lib/tools.js",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json"
+  },
+  "dsh": {
+    "manifestVersion": 1,
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "files": [
+    "cordis.patch.yml",
+    "locale/*.json",
+    "lib/index.js",
+    "lib/journal.mjs",
+    "lib/tools.js",
+    "lib/web.js",
+    "lib/web-entry.js",
+    "lib/quest-core.mjs",
+    "lib/commands.mjs"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=24",
+    "dsh": ">=0.2.1-rc.5 <0.3.0"
+  }
+}

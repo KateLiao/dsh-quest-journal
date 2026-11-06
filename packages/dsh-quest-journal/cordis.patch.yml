@@ -1,0 +1,18 @@
+# Quest Journal bundle patch — one insert layer over the empty profile root.
+# Later bundle patches and the user's profile cordis.patch.yml address these
+# rows by id, with the last write winning per row.
+#
+#   quest-journal        — shared SQLite journal + the `quest_*` Agent tools.
+#   quest-journal-web    — `/quest-journal/*` routes for the Web panel.
+#
+# The Web panel itself (browser half) is the separate
+# `@deepseek-ai/dsh-client-ui-quest-journal` bundle; it talks to these routes
+# because DSH packs every Client `remote.*` namespace at build time, so a
+# third-party bundle cannot register `remote.questJournal`.
+
+- insert:
+    - id: quest-journal
+      name: '@deepseek-ai/dsh-quest-journal'
+
+    - id: quest-journal-web
+      name: '@deepseek-ai/dsh-quest-journal/web'

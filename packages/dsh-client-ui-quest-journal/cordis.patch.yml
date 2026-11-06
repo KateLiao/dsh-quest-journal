@@ -1,0 +1,10 @@
+# Quest Journal Web panel bundle patch.
+#
+#   quest-journal-ui — one Loader entry: the package's host half registers the
+#                      `/quest-journal/*` routes, and its `dsh.client` manifest
+#                      ships the browser bundle that renders the sidebar entry
+#                      and the `main` page.
+
+- insert:
+    - id: quest-journal-ui
+      name: '@deepseek-ai/dsh-client-ui-quest-journal'

@@ -1,0 +1,48 @@
+{
+  "format": "quest-journal-export/v1",
+  "exported_at": "2026-01-01T00:00:00.000Z",
+  "quests": [
+    {
+      "id": "demo-quest",
+      "title": "示例项目需求梳理",
+      "description": "演示数据，不包含真实任务",
+      "status": "open",
+      "is_blocked": 0,
+      "blocked_reason": null,
+      "created_at": 1000,
+      "completed_at": null,
+      "archived_at": null,
+      "sort_order": 0
+    }
+  ],
+  "objectives": [
+    {
+      "id": "demo-objective",
+      "quest_id": "demo-quest",
+      "title": "明确项目目标",
+      "description": "",
+      "status": "open",
+      "is_blocked": 0,
+      "blocked_reason": null,
+      "created_at": 1100,
+      "completed_at": null,
+      "sort_order": 0
+    }
+  ],
+  "steps": [
+    {
+      "id": "demo-step",
+      "objective_id": "demo-objective",
+      "title": "与协作者确认需求",
+      "description": "",
+      "status": "open",
+      "is_blocked": 0,
+      "blocked_reason": null,
+      "created_at": 1200,
+      "completed_at": null,
+      "sort_order": 0
+    }
+  ],
+  "attachments": [],
+  "events": []
+}

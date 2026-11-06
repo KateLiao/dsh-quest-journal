@@ -1,0 +1,13 @@
+{
+  "name": "dsh-quest-journal",
+  "version": "0.4.0",
+  "private": true,
+  "description": "Quest Journal plugin for DeepSeek Harness: tasks, goals, progress and natural-language planning.",
+  "scripts": {
+    "test": "bash scripts/run-tests.sh"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "license": "MIT"
+}

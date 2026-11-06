@@ -1,0 +1,599 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Quest Journal — 交互预览</title>
+<style>
+  :root {
+    --bg: #16100e;
+    --panel: #1e1712;
+    --panel-2: #241b14;
+    --border: #3a2e22;
+    --border-soft: #2c231b;
+    --text: #e8dcc8;
+    --text-dim: #9c8f7c;
+    --text-faint: #6b5f50;
+    --accent: #c9a227;
+    --accent-dim: #8a6f1a;
+    --danger: #c0392b;
+    --ok: #7ba05b;
+    --done: #6b5f50;
+    --strike: #7a6f5e;
+    --radius: 8px;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: "PingFang SC", "Microsoft YaHei", -apple-system, "Segoe UI", sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  .app { display: grid; grid-template-columns: 320px 1fr; height: 100vh; }
+
+  /* ---- left column ---- */
+  .left { background: var(--panel); border-right: 1px solid var(--border); display: flex; flex-direction: column; min-height: 0; }
+  .tabs { display: flex; border-bottom: 1px solid var(--border); }
+  .tab {
+    flex: 1; padding: 12px 8px; background: none; border: none; color: var(--text-dim);
+    cursor: pointer; font-size: 13px; border-bottom: 2px solid transparent;
+  }
+  .tab.is-on { color: var(--accent); border-bottom-color: var(--accent); }
+  .list { flex: 1; overflow-y: auto; padding: 8px; }
+  .quest-item {
+    display: flex; align-items: center; gap: 8px; padding: 9px 10px; border-radius: var(--radius);
+    cursor: pointer; border: 1px solid transparent; margin-bottom: 4px;
+  }
+  .quest-item:hover { background: var(--panel-2); }
+  .quest-item.is-selected { border-color: var(--accent-dim); background: var(--panel-2); }
+  .quest-item .status { width: 16px; text-align: center; color: var(--text-faint); flex: none; }
+  .quest-item .status.done { color: var(--ok); }
+  .quest-item .title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .quest-item.is-done .title { color: var(--done); text-decoration: line-through; }
+  .new-btn {
+    margin: 10px; padding: 10px; background: none; border: 1px dashed var(--accent-dim);
+    color: var(--accent); border-radius: var(--radius); cursor: pointer; font-size: 13px;
+  }
+  .new-btn:hover { background: rgba(201,162,39,0.08); }
+  .footer-tools { display: flex; gap: 8px; margin: 0 10px 10px; }
+  .ghost-btn {
+    flex: 1; padding: 8px 10px; background: none; border: 1px solid var(--border);
+    color: var(--text-dim); border-radius: var(--radius); cursor: pointer; font-size: 12px;
+  }
+  .ghost-btn:hover { border-color: var(--accent-dim); color: var(--text); }
+  .toast {
+    position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+    background: var(--panel-2); border: 1px solid var(--border); color: var(--text);
+    padding: 10px 16px; border-radius: var(--radius); font-size: 13px; max-width: 70vw;
+    opacity: 0; pointer-events: none; transition: opacity 0.18s ease; z-index: 10;
+  }
+  .toast.is-on { opacity: 1; }
+  .toast.is-error { border-color: rgba(192,57,43,0.6); color: #e8a39a; }
+
+  /* ---- right column ---- */
+  .right { overflow-y: auto; padding: 28px clamp(20px, 4vw, 48px) 64px; }
+  .hint { color: var(--text-faint); padding: 40px 0; text-align: center; }
+  .error { color: #e6a8a0; background: rgba(192,57,43,0.12); border: 1px solid rgba(192,57,43,0.4); padding: 10px 14px; border-radius: var(--radius); margin-bottom: 16px; }
+
+  .quest-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+  .quest-name { margin: 0; font-size: 22px; font-weight: 600; letter-spacing: 0.3px; }
+  .quest-name.is-done { color: var(--strike); text-decoration: line-through; }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+  .actions button, .mini {
+    background: none; border: 1px solid var(--border); color: var(--text-dim);
+    border-radius: 6px; padding: 5px 10px; cursor: pointer; font-size: 12px;
+  }
+  .actions button:hover, .mini:hover { border-color: var(--accent-dim); color: var(--text); }
+  .desc { color: var(--text-dim); margin: 10px 0 0; white-space: pre-wrap; }
+  .section-title {
+    font-size: 12px; text-transform: uppercase; letter-spacing: 1px; color: var(--text-faint);
+    margin: 28px 0 10px; border-bottom: 1px solid var(--border-soft); padding-bottom: 6px;
+  }
+  .node-row { display: flex; align-items: center; gap: 8px; padding: 6px 4px; }
+  .node-row .status {
+    width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--border);
+    background: none; color: transparent; cursor: pointer; flex: none; font-size: 12px; line-height: 16px; text-align: center;
+  }
+  .node-row .status:hover { border-color: var(--accent); }
+  .node-row .status.done { border-color: var(--ok); color: var(--ok); background: rgba(123,160,91,0.12); }
+  .node-row .status.blocked { border-color: var(--danger); }
+  .node-title { flex: 1; cursor: pointer; min-width: 0; overflow-wrap: anywhere; }
+  .node-title.is-done { color: var(--done); text-decoration: line-through; }
+  .node-desc { color: var(--text-faint); font-size: 12px; padding: 0 4px 6px 30px; white-space: pre-wrap; }
+  .step .node-desc { padding-left: 26px; }
+  .badge {
+    background: rgba(192,57,43,0.15); border: 1px solid rgba(192,57,43,0.5); color: #e8a39a;
+    border-radius: 4px; padding: 1px 7px; font-size: 11px; white-space: nowrap; cursor: default;
+    max-width: 200px; overflow: hidden; text-overflow: ellipsis;
+  }
+  .objective { border-left: 2px solid var(--border-soft); margin: 4px 0 4px 6px; padding-left: 8px; }
+  .step { margin-left: 30px; border-left: 1px solid var(--border-soft); padding-left: 8px; }
+  .expand { color: var(--text-faint); width: 14px; flex: none; cursor: pointer; }
+
+  .attach { padding: 6px 4px; border-bottom: 1px dashed var(--border-soft); }
+  .attach a { color: var(--accent); text-decoration: none; }
+  .attach a:hover { text-decoration: underline; }
+  .trace { list-style: none; padding: 0; margin: 0; }
+  .trace li { padding: 6px 4px; border-bottom: 1px solid var(--border-soft); font-size: 13px; }
+  .trace .time { color: var(--text-faint); margin-right: 8px; font-size: 12px; }
+  .trace .source { color: var(--accent-dim); margin-left: 8px; font-size: 11px; }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="left">
+    <div class="tabs">
+      <button class="tab is-on" data-tab="active">进行中</button>
+      <button class="tab" data-tab="archived">已归档</button>
+    </div>
+    <div class="list" id="list"></div>
+    <button class="new-btn" id="newQuest">＋ 新建任务</button>
+    <div class="footer-tools">
+      <button class="ghost-btn" id="importJournal">⇩ 载入导出数据</button>
+    </div>
+    <input type="file" id="importFile" accept=".json,application/json" hidden>
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  </aside>
+  <main class="right" id="detail"></main>
+</div>
+
+<script>
+// ---------------------------------------------------------------------------
+// In-memory store mirroring the plugin core logic (quest-core.mjs).
+// Persists to localStorage so a refresh behaves like a DSH restart (AC01).
+// ---------------------------------------------------------------------------
+const KEY = "quest-journal-preview-v1";
+const uid = () => (crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2) + Date.now());
+
+function load() {
+  try {
+    const raw = localStorage.getItem(KEY);
+    if (raw) return JSON.parse(raw);
+  } catch (e) { /* ignore */ }
+  return { quests: [], objectives: [], steps: [], attachments: [], events: [] };
+}
+
+const db = load();
+function save() { try { localStorage.setItem(KEY, JSON.stringify(db)); } catch (e) { /* ignore */ } }
+
+function event(questId, nodeType, nodeId, eventType, previous, next, summary, source) {
+  db.events.push({ id: uid(), quest_id: questId, node_type: nodeType, node_id: nodeId,
+    event_type: eventType, previous_value: previous ?? null, new_value: next ?? null,
+    summary, source, created_at: Date.now() });
+}
+
+function questIdOf(nodeType, nodeId) {
+  if (nodeType === "quest") return nodeId;
+  if (nodeType === "objective") return db.objectives.find(o => o.id === nodeId)?.quest_id;
+  if (nodeType === "step") {
+    const s = db.steps.find(s => s.id === nodeId);
+    return s ? db.objectives.find(o => o.id === s.objective_id)?.quest_id : undefined;
+  }
+}
+
+function getNode(nodeType, nodeId) {
+  if (nodeType === "quest") return db.quests.find(q => q.id === nodeId);
+  if (nodeType === "objective") return db.objectives.find(o => o.id === nodeId);
+  if (nodeType === "step") return db.steps.find(s => s.id === nodeId);
+}
+
+// ---- mutations ----
+function createQuest(title, description = "") {
+  const q = { id: uid(), title, description, status: "open", is_blocked: false, blocked_reason: null,
+    created_at: Date.now(), completed_at: null, archived_at: null, sort_order: db.quests.length };
+  db.quests.push(q);
+  event(q.id, "quest", q.id, "created", null, q, `Quest "${q.title}" created`, "manual");
+  save(); return q;
+}
+function addObjective(questId, title) {
+  const o = { id: uid(), quest_id: questId, title, description: "", status: "open", is_blocked: false, blocked_reason: null,
+    created_at: Date.now(), completed_at: null, sort_order: db.objectives.filter(x => x.quest_id === questId).length };
+  db.objectives.push(o);
+  event(questId, "objective", o.id, "created", null, o, `Objective "${o.title}" created`, "manual");
+  save(); return o;
+}
+function addStep(objectiveId, title) {
+  const s = { id: uid(), objective_id: objectiveId, title, description: "", status: "open", is_blocked: false, blocked_reason: null,
+    created_at: Date.now(), completed_at: null, sort_order: db.steps.filter(x => x.objective_id === objectiveId).length };
+  db.steps.push(s);
+  event(questIdOf("objective", objectiveId), "step", s.id, "created", null, s, `Step "${s.title}" created`, "manual");
+  save(); return s;
+}
+function setCompleted(nodeType, nodeId, completed) {
+  const n = getNode(nodeType, nodeId);
+  const target = completed ? "completed" : "open";
+  if (n.status === target) return;
+  const prev = { ...n };
+  n.status = target; n.completed_at = completed ? Date.now() : null;
+  event(questIdOf(nodeType, nodeId), nodeType, nodeId, completed ? "completed" : "uncompleted", prev, n,
+    `${nodeType} "${n.title}" ${completed ? "completed" : "uncompleted"}`, "manual");
+  save();
+}
+function setBlocked(nodeType, nodeId, blocked, reason = "") {
+  const n = getNode(nodeType, nodeId);
+  if (blocked === n.is_blocked) return;
+  const prev = { ...n };
+  n.is_blocked = blocked; n.blocked_reason = blocked ? (reason || null) : null;
+  event(questIdOf(nodeType, nodeId), nodeType, nodeId, blocked ? "blocked" : "unblocked", prev, n,
+    `${nodeType} "${n.title}" ${blocked ? "blocked" : "unblocked"}`, "manual");
+  save();
+}
+function addAttachment(nodeType, nodeId, type, content) {
+  const a = { id: uid(), node_type: nodeType, node_id: nodeId, type, title: "", content,
+    created_at: Date.now(), updated_at: Date.now() };
+  db.attachments.push(a);
+  event(questIdOf(nodeType, nodeId), nodeType, nodeId, "attachment_added", null, a, `Attachment added`, "manual");
+  save(); return a;
+}
+function archiveQuest(questId) {
+  const q = getNode("quest", questId);
+  if (q.archived_at) return;
+  const prev = { ...q };
+  q.archived_at = Date.now();
+  event(questId, "quest", questId, "archived", prev, q, `Quest "${q.title}" archived`, "manual");
+  save();
+}
+function restoreQuest(questId) {
+  const q = getNode("quest", questId);
+  if (!q.archived_at) return;
+  const prev = { ...q };
+  q.archived_at = null;
+  event(questId, "quest", questId, "restored", prev, q, `Quest "${q.title}" restored`, "manual");
+  save();
+}
+
+// ---------------------------------------------------------------------------
+// Import a JSON snapshot of the real SQLite journal.
+// The preview cannot read SQLite itself, so `scripts/export-journal.mjs` dumps
+// the database to JSON and this import path loads it into the UI. Importing
+// replaces the browser-local snapshot only; it never writes back to SQLite.
+// ---------------------------------------------------------------------------
+const TABLE_NAMES = ["quests", "objectives", "steps", "attachments", "events"];
+const DEFAULT_EXPORT_URL = "quest-journal-export.json";
+const NODE_KINDS = new Set(["quest", "objective", "step"]);
+
+const $toast = document.getElementById("toast");
+let toastTimer = null;
+function toast(message, isError = false) {
+  $toast.textContent = message;
+  $toast.classList.toggle("is-error", isError);
+  $toast.classList.add("is-on");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => $toast.classList.remove("is-on"), 4000);
+}
+
+const asText = (value, fallback = "") =>
+  typeof value === "string" ? value : value == null ? fallback : String(value);
+const asTime = (value) => {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? null : parsed;
+};
+const asBool = (value) => value === true || value === 1;
+const asOrder = (value) => (typeof value === "number" && Number.isFinite(value) ? value : 0);
+const asStatus = (value) => (value === "completed" ? "completed" : "open");
+const asBlockedReason = (value) => (value == null ? null : asText(value));
+
+function normalizeImport(raw) {
+  if (!raw || typeof raw !== "object" || !Array.isArray(raw.quests)) {
+    throw new Error("不是任务导出文件（缺少 quests 数组）");
+  }
+  const pick = (table) => (Array.isArray(raw[table]) ? raw[table] : []);
+  const rawCount = TABLE_NAMES.reduce((n, table) => n + pick(table).length, 0);
+  const data = {};
+
+  data.quests = pick("quests")
+    .filter((q) => q && asText(q.id) && asText(q.title))
+    .map((q) => ({
+      id: asText(q.id),
+      title: asText(q.title),
+      description: asText(q.description),
+      status: asStatus(q.status),
+      is_blocked: asBool(q.is_blocked),
+      blocked_reason: asBlockedReason(q.blocked_reason),
+      created_at: asTime(q.created_at) ?? Date.now(),
+      completed_at: asTime(q.completed_at),
+      archived_at: asTime(q.archived_at),
+      sort_order: asOrder(q.sort_order),
+    }));
+
+  const questIds = new Set(data.quests.map((q) => q.id));
+  data.objectives = pick("objectives")
+    .filter((o) => o && asText(o.id) && asText(o.title) && questIds.has(asText(o.quest_id)))
+    .map((o) => ({
+      id: asText(o.id),
+      quest_id: asText(o.quest_id),
+      title: asText(o.title),
+      description: asText(o.description),
+      status: asStatus(o.status),
+      is_blocked: asBool(o.is_blocked),
+      blocked_reason: asBlockedReason(o.blocked_reason),
+      created_at: asTime(o.created_at) ?? Date.now(),
+      completed_at: asTime(o.completed_at),
+      sort_order: asOrder(o.sort_order),
+    }));
+
+  const objectiveIds = new Set(data.objectives.map((o) => o.id));
+  data.steps = pick("steps")
+    .filter((s) => s && asText(s.id) && asText(s.title) && objectiveIds.has(asText(s.objective_id)))
+    .map((s) => ({
+      id: asText(s.id),
+      objective_id: asText(s.objective_id),
+      title: asText(s.title),
+      description: asText(s.description),
+      status: asStatus(s.status),
+      is_blocked: asBool(s.is_blocked),
+      blocked_reason: asBlockedReason(s.blocked_reason),
+      created_at: asTime(s.created_at) ?? Date.now(),
+      completed_at: asTime(s.completed_at),
+      sort_order: asOrder(s.sort_order),
+    }));
+
+  const knownNodes = new Set([...questIds, ...objectiveIds, ...data.steps.map((s) => s.id)]);
+  data.attachments = pick("attachments")
+    .filter((a) => a && asText(a.id) && NODE_KINDS.has(a.node_type) && knownNodes.has(asText(a.node_id)))
+    .map((a) => ({
+      id: asText(a.id),
+      node_type: a.node_type,
+      node_id: asText(a.node_id),
+      type: a.type === "link" ? "link" : "text",
+      title: asText(a.title),
+      content: asText(a.content),
+      created_at: asTime(a.created_at) ?? Date.now(),
+      updated_at: asTime(a.updated_at) ?? asTime(a.created_at) ?? Date.now(),
+    }));
+
+  data.events = pick("events")
+    .filter((e) => e && asText(e.id) && questIds.has(asText(e.quest_id)))
+    .map((e) => ({
+      id: asText(e.id),
+      quest_id: asText(e.quest_id),
+      node_type: asText(e.node_type),
+      node_id: asText(e.node_id),
+      event_type: asText(e.event_type),
+      previous_value: e.previous_value ?? null,
+      new_value: e.new_value ?? null,
+      summary: asText(e.summary),
+      source: asText(e.source, "manual"),
+      created_at: asTime(e.created_at) ?? Date.now(),
+    }));
+
+  const kept = TABLE_NAMES.reduce((n, table) => n + data[table].length, 0);
+  return { data, dropped: rawCount - kept };
+}
+
+function applyImport({ data, dropped }, label) {
+  for (const table of TABLE_NAMES) db[table] = data[table];
+  save();
+  tab = "active";
+  document.querySelectorAll(".tab").forEach((t) => t.classList.toggle("is-on", t.dataset.tab === "active"));
+  selectedId = data.quests[0]?.id ?? null;
+  for (const key of Object.keys(expanded)) delete expanded[key];
+  render();
+  const droppedNote = dropped > 0 ? `，忽略 ${dropped} 条无归属记录` : "";
+  toast(`已载入 ${data.quests.length} 个任务 / ${data.objectives.length} 个目标 / ${data.steps.length} 个进展${droppedNote}${label ? ` · ${label}` : ""}`);
+}
+
+const $importFile = document.getElementById("importFile");
+document.getElementById("importJournal").addEventListener("click", () => $importFile.click());
+$importFile.addEventListener("change", async () => {
+  const file = $importFile.files?.[0];
+  if (!file) return;
+  try {
+    const parsed = normalizeImport(JSON.parse(await file.text()));
+    if (db.quests.length > 0 && !confirm(`载入将覆盖当前 ${db.quests.length} 个任务（含本地改动），继续？`)) return;
+    applyImport(parsed, file.name);
+  } catch (error) {
+    toast(`载入失败：${error.message}`, true);
+  } finally {
+    $importFile.value = "";
+  }
+});
+
+// When the page is served over http(s), pick up the export dropped next to it.
+// file:// pages are not allowed to fetch local files, so the button above is
+// the only path there.
+async function fetchDefaultExport() {
+  if (location.protocol === "file:") return null;
+  try {
+    const res = await fetch(DEFAULT_EXPORT_URL, { cache: "no-store" });
+    if (!res.ok) return null;
+    return normalizeImport(await res.json());
+  } catch {
+    return null;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Rendering
+// ---------------------------------------------------------------------------
+let tab = "active";
+let selectedId = null;
+const expanded = {};
+
+const $list = document.getElementById("list");
+const $detail = document.getElementById("detail");
+
+function questsForTab() {
+  return db.quests.filter(q => tab === "archived" ? q.archived_at : !q.archived_at)
+    .sort((a, b) => a.sort_order - b.sort_order);
+}
+
+function badge(n) {
+  return n.is_blocked ? `<span class="badge" title="${esc(n.blocked_reason || "")}">⛔ ${esc(n.blocked_reason || "阻塞")}</span>` : "";
+}
+function esc(s) { return String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c])); }
+function timeStr(t) { return t ? new Date(t).toLocaleString() : ""; }
+
+function renderList() {
+  const qs = questsForTab();
+  $list.innerHTML = qs.length === 0
+    ? `<div class="hint">暂无任务</div>`
+    : qs.map(q => `
+      <div class="quest-item ${q.id === selectedId ? "is-selected" : ""} ${q.status === "completed" ? "is-done" : ""}" data-id="${q.id}">
+        <span class="status ${q.status === "completed" ? "done" : ""}">${q.status === "completed" ? "✓" : "○"}</span>
+        <span class="title">${esc(q.title)}</span>
+        ${badge(q)}
+      </div>`).join("");
+}
+
+function renderDetail() {
+  const q = db.quests.find(x => x.id === selectedId);
+  if (!q) { $detail.innerHTML = `<div class="hint">${selectedId ? "未找到任务" : "点击左侧任务查看详情"}</div>`; return; }
+
+  const objectives = db.objectives.filter(o => o.quest_id === q.id).sort((a, b) => a.sort_order - b.sort_order);
+  const attachments = db.attachments.filter(a => a.node_type === "quest" && a.node_id === q.id);
+  const trace = db.events.filter(e => e.quest_id === q.id).sort((a, b) => a.created_at - b.created_at);
+
+  const objHtml = objectives.map(o => {
+    const steps = db.steps.filter(s => s.objective_id === o.id).sort((a, b) => a.sort_order - b.sort_order);
+    const open = expanded[o.id] !== false;
+    return `
+      <div class="objective">
+        <div class="node-row">
+          <span class="expand" data-expand="${o.id}">${open ? "▾" : "▸"}</span>
+          <button class="status ${o.status === "completed" ? "done" : ""} ${o.is_blocked ? "blocked" : ""}" data-complete="objective:${o.id}">${o.status === "completed" ? "✓" : ""}</button>
+          <span class="node-title ${o.status === "completed" ? "is-done" : ""}" data-expand="${o.id}">${esc(o.title)}</span>
+          ${badge(o)}
+          <button class="mini" data-block="objective:${o.id}">${o.is_blocked ? "解除阻塞" : "阻塞"}</button>
+          <button class="mini" data-addstep="${o.id}">＋ 进展</button>
+          <button class="mini" data-attach="objective:${o.id}">＋ 备注/链接</button>
+        </div>
+        ${o.description ? `<div class="node-desc">${esc(o.description)}</div>` : ""}
+        ${open ? steps.map(s => `
+          <div class="step">
+            <div class="node-row">
+              <button class="status ${s.status === "completed" ? "done" : ""} ${s.is_blocked ? "blocked" : ""}" data-complete="step:${s.id}">${s.status === "completed" ? "✓" : ""}</button>
+              <span class="node-title ${s.status === "completed" ? "is-done" : ""}">${esc(s.title)}</span>
+              ${badge(s)}
+              <button class="mini" data-block="step:${s.id}">${s.is_blocked ? "解除阻塞" : "阻塞"}</button>
+              <button class="mini" data-attach="step:${s.id}">＋</button>
+            </div>
+            ${s.description ? `<div class="node-desc">${esc(s.description)}</div>` : ""}
+          </div>`).join("") : ""}
+      </div>`;
+  }).join("");
+
+  const attachHtml = attachments.map(a => `
+    <div class="attach">${a.type === "link"
+      ? `🔗 <a href="${esc(a.content)}" target="_blank" rel="noreferrer">${esc(a.title || a.content)}</a>`
+      : `📝 ${esc(a.content)}`}</div>`).join("");
+
+  const traceHtml = trace.length === 0
+    ? `<div class="hint">暂无历史记录</div>`
+    : `<ul class="trace">${trace.slice().reverse().map(e => `
+        <li><span class="time">${timeStr(e.created_at)}</span>${esc(e.summary)}<span class="source">[${esc(e.source)}]</span></li>`).join("")}</ul>`;
+
+  $detail.innerHTML = `
+    ${q.archived_at ? `<div class="error">此任务已归档（只读）。点击「恢复」可重新编辑。</div>` : ""}
+    <div class="quest-head">
+      <h2 class="quest-name ${q.status === "completed" ? "is-done" : ""}">${esc(q.title)}</h2>
+      <div class="actions">
+        <button data-complete="quest:${q.id}">${q.status === "completed" ? "取消完成" : "完成"}</button>
+        <button data-block="quest:${q.id}">${q.is_blocked ? "解除阻塞" : "阻塞"}</button>
+        ${q.archived_at ? `<button data-restore="${q.id}">恢复</button>` : `<button data-archive="${q.id}">归档</button>`}
+        <button data-attach="quest:${q.id}">＋ 备注/链接</button>
+      </div>
+    </div>
+    ${q.description ? `<p class="desc">${esc(q.description)}</p>` : ""}
+    ${badge(q)}
+    <div class="section-title">目标 Objective</div>
+    ${objHtml || `<div class="hint">暂无目标</div>`}
+    <button class="new-btn" data-addobjective="${q.id}">＋ 添加目标</button>
+    <div class="section-title">备注与链接</div>
+    ${attachHtml || `<div class="hint">暂无备注或链接</div>`}
+    <div class="section-title">历史记录 Trace</div>
+    ${traceHtml}`;
+}
+
+// ---------------------------------------------------------------------------
+// Events (event delegation)
+// ---------------------------------------------------------------------------
+document.addEventListener("click", (e) => {
+  const tabBtn = e.target.closest(".tab");
+  if (tabBtn) {
+    tab = tabBtn.dataset.tab;
+    document.querySelectorAll(".tab").forEach(t => t.classList.toggle("is-on", t === tabBtn));
+    selectedId = null;
+    render(); return;
+  }
+  const item = e.target.closest(".quest-item");
+  if (item) { selectedId = item.dataset.id; render(); return; }
+  if (e.target.id === "newQuest") {
+    const t = prompt("任务名称"); if (t && t.trim()) { const q = createQuest(t.trim()); selectedId = q.id; }
+    render(); return;
+  }
+  const complete = e.target.closest("[data-complete]");
+  if (complete) {
+    const [type, id] = complete.dataset.complete.split(":");
+    const n = getNode(type, id);
+    setCompleted(type, id, n.status !== "completed");
+    render(); return;
+  }
+  const block = e.target.closest("[data-block]");
+  if (block) {
+    const [type, id] = block.dataset.block.split(":");
+    const n = getNode(type, id);
+    let reason = "";
+    if (!n.is_blocked) { reason = prompt("阻塞原因（可选）") || ""; }
+    setBlocked(type, id, !n.is_blocked, reason);
+    render(); return;
+  }
+  const attach = e.target.closest("[data-attach]");
+  if (attach) {
+    const [type, id] = attach.dataset.attach.split(":");
+    const kind = prompt("类型：text（文本备注） / link（链接）", "text");
+    if (kind !== "text" && kind !== "link") return;
+    const content = prompt(kind === "link" ? "输入 http(s) 链接地址" : "输入备注内容（支持 Markdown）");
+    if (content && content.trim()) addAttachment(type, id, kind, content.trim());
+    render(); return;
+  }
+  const addObj = e.target.closest("[data-addobjective]");
+  if (addObj) {
+    const t = prompt("目标名称"); if (t && t.trim()) addObjective(addObj.dataset.addobjective, t.trim());
+    render(); return;
+  }
+  const addStep = e.target.closest("[data-addstep]");
+  if (addStep) {
+    const t = prompt("进展内容"); if (t && t.trim()) addStep(addStep.dataset.addstep, t.trim());
+    render(); return;
+  }
+  const archive = e.target.closest("[data-archive]");
+  if (archive) { archiveQuest(archive.dataset.archive); render(); return; }
+  const restore = e.target.closest("[data-restore]");
+  if (restore) { restoreQuest(restore.dataset.restore); render(); return; }
+  const expand = e.target.closest("[data-expand]");
+  if (expand) { const id = expand.dataset.expand; expanded[id] = !(expanded[id] !== false); render(); return; }
+});
+
+function render() { renderList(); renderDetail(); }
+
+// Seed one example quest on first run so the UI is immediately visible.
+function seedExample() {
+  const q = createQuest("机器人说话人定位方案验证", "验证机器人的说话人定位（SSL）方案是否满足量产要求。");
+  const o1 = addObjective(q.id, "技术方案确认");
+  addStep(o1.id, "确认 UWB 方案可行性");
+  const o2 = addObjective(q.id, "测试验收");
+  const s = addStep(o2.id, "收集定位误差数据");
+  setBlocked("objective", o2.id, true, "还在等算法提供定位误差数据");
+  setCompleted("step", s.id, true);
+  addAttachment("quest", q.id, "link", "https://example.feishu.cn/doc/ssl-plan");
+  selectedId = q.id;
+}
+
+// First paint: reuse the browser snapshot; otherwise try the exported SQLite
+// snapshot; otherwise fall back to the demo quest.
+async function bootstrap() {
+  if (db.quests.length === 0) {
+    const imported = await fetchDefaultExport();
+    if (imported) { applyImport(imported, DEFAULT_EXPORT_URL); return; }
+    seedExample();
+  }
+  render();
+}
+bootstrap();
+</script>
+</body>
+</html>

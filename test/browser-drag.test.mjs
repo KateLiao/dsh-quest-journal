@@ -55,7 +55,19 @@ try{
  assert.ok(await evaluate('document.querySelector(".qj-create-preview").textContent.includes("调研了解仿真平台")'));
  console.log('PASS native new-task input and full decomposition preview');
  if(process.env.QJ_CREATE_SCREENSHOT){const {writeFileSync}=await import('node:fs');const screenshot=await send('Page.captureScreenshot',{format:'png'});writeFileSync(process.env.QJ_CREATE_SCREENSHOT,Buffer.from(screenshot.data,'base64'));}
- await click('.qj-create-dialog .qj-plan .qj-primary');await wait(150);
+ await send('Emulation.setDeviceMetricsOverride',{width:520,height:560,deviceScaleFactor:1,mobile:false});
+ await evaluate(`(() => {
+   const scroll = document.querySelector('.qj-create-scroll');
+   scroll.scrollTop = scroll.scrollHeight;
+ })()`);
+ assert.ok(await evaluate(`(() => {
+   const scroll = document.querySelector('.qj-create-scroll');
+   const button = document.querySelector('.qj-create-footer .qj-primary');
+   const rect = button.getBoundingClientRect();
+   return scroll.scrollTop > 0 && !button.disabled && rect.bottom <= innerHeight
+     && button.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2));
+ })()`), 'confirmation remains clickable after scrolling the preview in a short viewport');
+ await click('.qj-create-footer .qj-primary');await wait(150);
  assert.ok(await evaluate('!document.querySelector(".qj-create-dialog")'));
  assert.equal(await evaluate('document.querySelector(".qj-quest-item[aria-current=true]").dataset.sortId'),'native-new-task');
  assert.ok(await evaluate('document.querySelector(".qj-detail").textContent.includes("完成 示例项目 A PRD")'));

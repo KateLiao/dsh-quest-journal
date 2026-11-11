@@ -165,7 +165,7 @@ const dialog=mount(dialogElement.type,{onClose:()=>closed++,onCreated:async q=>{
 const creatorElement=find(dt,n=>typeof n.type==='function'&&n.type.name==='CommandComposer');const creator=mount(creatorElement.type,creatorElement.props);
 responseMode='ready';let createTree=inputText(creator,'完成 示例项目 A PRD，和 协作者 同步、确认指标、调研平台');
 const taskWrites=edits.length;await button(createTree,'生成任务与拆解').props.onClick();createTree=creator.render();assert.equal(edits.length,taskWrites);assert.ok(requests.at(-1).path.endsWith('/command/new/preview'));assert.equal(requests.at(-1).body.quest_id,undefined);
-dt=dialog.render();assert.ok(nodes(dt).some(n=>n.children.includes('完成 示例项目 A PRD')));assert.ok(nodes(dt).some(n=>n.children.includes('和 协作者 同步思路')));
+assert.ok(nodes(createTree).some(n=>n.children.includes('完成 示例项目 A PRD')));assert.ok(nodes(createTree).some(n=>n.children.includes('和 协作者 同步思路')));
 await button(createTree,'创建任务及拆解').props.onClick();assert.equal(newCreated.id,'created-q');assert.equal(requests.at(-1).body.plan_id,'creation-plan');assert.ok(requests.at(-1).path.endsWith('/command/new/apply'));
 // Failed creation generation keeps the full intent, and clarification stays local.
 responseMode='error';const failedCreator=mount(creatorElement.type,creatorElement.props);createTree=inputText(failedCreator,'我想完成新项目');await button(createTree,'生成任务与拆解').props.onClick();createTree=failedCreator.render();assert.equal(find(createTree,n=>n.type==='textarea').props.value,'我想完成新项目');

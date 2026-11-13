@@ -1,7 +1,7 @@
 {
   "name": "@deepseek-ai/dsh-quest-journal",
   "description": "Quest Journal: an RPG-style task journal (Quest → Objective → Step) with attachments, trace history, archiving, Agent tools, and a self-hosted web panel backend.",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "publishConfig": {
     "access": "public"
   },
@@ -29,7 +29,9 @@
     "lib/web.js",
     "lib/web-entry.js",
     "lib/quest-core.mjs",
-    "lib/commands.mjs"
+    "lib/commands.mjs",
+    "lib/deadline.mjs",
+    "lib/todo-core.mjs"
   ],
   "license": "MIT",
   "engines": {

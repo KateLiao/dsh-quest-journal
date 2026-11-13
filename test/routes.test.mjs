@@ -171,6 +171,16 @@ check(res.status===200 && res.body.quest.id===newQuestId && service.listQuests()
 res=await call("POST", "/command/new/preview", {headers:{"sec-fetch-site":"cross-site"},json:{request_id:"new-route-request2",instruction:"create"}});
 check(res.status===403, "cross-site new-task model calls are rejected");
 
+// Quick capture and deadlines share the authenticated operation route.
+res=await call("POST","/ops",{json:{changes:[{op:"create_todo",request_id:"route-todo-request",title:"HTTP 待办",due_date:"2026-12-01"}]}});
+const todoId=res.body.results[0].node.id;
+check(res.status===200,"TODO capture is accepted through authenticated ops");
+res=await call("GET","/todos");check(res.status===200&&res.body.todos[0].due_date==="2026-12-01","TODO list returns persistent dates");
+rejection=401;res=await call("GET","/todos");check(res.status===401,"TODO list requires authentication");rejection=null;
+res=await call("POST","/ops",{headers:{"sec-fetch-site":"cross-site"},json:{changes:[{op:"delete_todo",todo_id:todoId}]}});check(res.status===403,"TODO writes reject cross-site requests");
+res=await call("POST","/ops",{json:{changes:[{op:"convert_todo",todo_id:todoId,quest_id:questId}]}});check(res.status===200&&res.body.results[0].node.converted_at,"TODO conversion succeeds through HTTP");
+res=await call("POST","/ops",{json:{changes:[{op:"update_node",node_type:"quest",node_id:questId,due_date:"invalid"}]}});check(res.status===400&&res.body.code==="INVALID_DEADLINE","invalid deadlines return a stable error code");
+
 store.close();
 console.log(`\n${passed} passed, ${failed.length} failed`);
 process.exit(failed.length > 0 ? 1 : 0);

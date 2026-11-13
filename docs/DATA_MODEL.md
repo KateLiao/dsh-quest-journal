@@ -134,3 +134,9 @@ Trace 独立持久化于 SQLite `events` 表，不因归档或 DSH 重启丢失�
 `quests` / `objectives` / `steps` / `attachments` / `events` 五张表，外加 `objectives(quest_id, sort_order)`、`steps(objective_id, sort_order)`、`attachments(node_type, node_id)`、`events(quest_id, created_at)` 索引。
 
 写操作全部通过可重入事务（外层 `BEGIN IMMEDIATE`，嵌套 `SAVEPOINT`）保证原子性——`applyChanges` 批量提交在任一操作失败时整体回滚。
+
+## v0.5.0 · 截止日期与快速 TODO
+
+Quest / Objective / Step 新增可空 `due_date`（YYYY-MM-DD 本地日历日）与 `due_at`（epoch 毫秒绝对时间），两者互斥。旧库自动迁移为空；层级转换和完成操作保留截止日期。
+
+`todos` 保存 id、title、status、created_at、updated_at、completed_at、due_date、due_at、deleted_at、converted_at，以及 quest_id / target_type / target_id、幂等请求 ID 和转换快照。`todo_events` 保存独立 TODO 变更；QuestEvent 新增 `todo_converted` / `todo_conversion_undone`。转入保留原创建/完成时间和状态，撤销要求新节点未发生后续修改。详细语义见 [快速 TODO 与时间信息](TODO_AND_DATES.md)。

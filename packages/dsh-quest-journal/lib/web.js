@@ -72,6 +72,7 @@ export function createRoutes({ getService, reject, getCommands }) {
       const method = (req.method || "GET").toUpperCase();
 
       if (method === "GET" || method === "HEAD") {
+        if (path === "todos") { sendJson(res, 200, {todos:service.todos.list()}); return; }
         if (path === "state") {
           const includeArchived = url.searchParams.get("archived") === "1";
           sendJson(res, 200, { quests: service.listQuests({ includeArchived }) });

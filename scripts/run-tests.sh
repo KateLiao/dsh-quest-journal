@@ -44,7 +44,7 @@ QJ_CLIENT_MODULE="$TMP_DIR/client.txt" "$NODE_BIN" "$ROOT_DIR/test/client.test.m
 "$NODE_BIN" "$ROOT_DIR/test/commands.test.mjs"
 
 # Activate the actual plugin entries with service doubles; copy .js as .mjs.
-for module in quest-core.mjs journal.mjs commands.mjs; do
+for module in quest-core.mjs journal.mjs commands.mjs deadline.mjs todo-core.mjs; do
   sed -n '1,$p' "$ROOT_DIR/packages/dsh-quest-journal/lib/$module" > "$TMP_DIR/$module"
 done
 sed 's|"./web.js"|"./web.mjs"|' "$ROOT_DIR/packages/dsh-quest-journal/lib/web-entry.js" > "$TMP_DIR/web-entry.mjs"
@@ -54,3 +54,5 @@ QJ_ENTRY_MODULE="file://$TMP_DIR/web-entry.mjs" QJ_TOOLS_MODULE="file://$TMP_DIR
 "$NODE_BIN" "$ROOT_DIR/test/reorder.test.mjs"
 
 "$NODE_BIN" "$ROOT_DIR/test/creation.test.mjs"
+
+"$NODE_BIN" "$ROOT_DIR/test/todos.test.mjs"

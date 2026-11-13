@@ -8,6 +8,8 @@
 
 import { randomUUID } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
+import { validateDeadline } from "./deadline.mjs";
+import { TodoJournal } from "./todo-core.mjs";
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -34,6 +36,8 @@ export const EVENT_TYPES = [
   "moved",
   "command_applied",
   "reordered",
+  "todo_converted",
+  "todo_conversion_undone",
 ];
 
 // ---------------------------------------------------------------------------
@@ -192,6 +196,8 @@ function rowToQuest(row) {
     updated_at: row.updated_at ?? row.created_at,
     priority: row.priority ?? "P1",
     completed_at: row.completed_at ?? null,
+    due_date: row.due_date ?? null,
+    due_at: row.due_at ?? null,
     archived_at: row.archived_at ?? null,
     sort_order: row.sort_order,
   };
@@ -210,6 +216,8 @@ function rowToObjective(row) {
     updated_at: row.updated_at ?? row.created_at,
     priority: row.priority ?? "P1",
     completed_at: row.completed_at ?? null,
+    due_date: row.due_date ?? null,
+    due_at: row.due_at ?? null,
     sort_order: row.sort_order,
   };
 }
@@ -227,6 +235,8 @@ function rowToStep(row) {
     updated_at: row.updated_at ?? row.created_at,
     priority: row.priority ?? "P1",
     completed_at: row.completed_at ?? null,
+    due_date: row.due_date ?? null,
+    due_at: row.due_at ?? null,
     sort_order: row.sort_order,
   };
 }
@@ -267,6 +277,8 @@ export class QuestJournalStore {
     for (const table of ["quests", "objectives", "steps"]) {
       const columns = this.db.prepare(`PRAGMA table_info(${table})`).all().map(c => c.name);
       if (!columns.includes("updated_at")) this.db.exec(`ALTER TABLE ${table} ADD COLUMN updated_at INTEGER`);
+      if (!columns.includes("due_date")) this.db.exec(`ALTER TABLE ${table} ADD COLUMN due_date TEXT`);
+      if (!columns.includes("due_at")) this.db.exec(`ALTER TABLE ${table} ADD COLUMN due_at INTEGER`);
       if (!columns.includes("priority")) this.db.exec(`ALTER TABLE ${table} ADD COLUMN priority TEXT NOT NULL DEFAULT 'P1'`);
       this.db.exec(`UPDATE ${table} SET updated_at = created_at WHERE updated_at IS NULL`);
     }
@@ -327,8 +339,8 @@ export class QuestJournalStore {
   insertQuest(quest) {
     this.db
       .prepare(
-        `INSERT INTO quests (id, title, description, status, is_blocked, blocked_reason, created_at, completed_at, archived_at, sort_order)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO quests (id, title, description, status, is_blocked, blocked_reason, created_at, completed_at, archived_at, sort_order, due_date, due_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         quest.id,
@@ -341,6 +353,7 @@ export class QuestJournalStore {
         quest.completed_at,
         quest.archived_at,
         quest.sort_order,
+        quest.due_date ?? null, quest.due_at ?? null,
       );
   }
 
@@ -362,7 +375,7 @@ export class QuestJournalStore {
     const next = { ...current, ...patch };
     this.db
       .prepare(
-        `UPDATE quests SET title = ?, description = ?, status = ?, is_blocked = ?, blocked_reason = ?, completed_at = ?, archived_at = ?, sort_order = ? WHERE id = ?`,
+        `UPDATE quests SET title = ?, description = ?, status = ?, is_blocked = ?, blocked_reason = ?, completed_at = ?, archived_at = ?, sort_order = ?, due_date = ?, due_at = ? WHERE id = ?`,
       )
       .run(
         next.title,
@@ -373,6 +386,7 @@ export class QuestJournalStore {
         next.completed_at,
         next.archived_at,
         next.sort_order,
+        next.due_date, next.due_at,
         id,
       );
     return next;
@@ -383,8 +397,8 @@ export class QuestJournalStore {
   insertObjective(objective) {
     this.db
       .prepare(
-        `INSERT INTO objectives (id, quest_id, title, description, status, is_blocked, blocked_reason, created_at, completed_at, sort_order)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO objectives (id, quest_id, title, description, status, is_blocked, blocked_reason, created_at, completed_at, sort_order, due_date, due_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         objective.id,
@@ -397,6 +411,7 @@ export class QuestJournalStore {
         objective.created_at,
         objective.completed_at,
         objective.sort_order,
+        objective.due_date ?? null, objective.due_at ?? null,
       );
   }
 
@@ -418,7 +433,7 @@ export class QuestJournalStore {
     const next = { ...current, ...patch };
     this.db
       .prepare(
-        `UPDATE objectives SET title = ?, description = ?, status = ?, is_blocked = ?, blocked_reason = ?, completed_at = ?, sort_order = ? WHERE id = ?`,
+        `UPDATE objectives SET title = ?, description = ?, status = ?, is_blocked = ?, blocked_reason = ?, completed_at = ?, sort_order = ?, due_date = ?, due_at = ? WHERE id = ?`,
       )
       .run(
         next.title,
@@ -428,6 +443,7 @@ export class QuestJournalStore {
         next.blocked_reason,
         next.completed_at,
         next.sort_order,
+        next.due_date, next.due_at,
         id,
       );
     return next;
@@ -438,8 +454,8 @@ export class QuestJournalStore {
   insertStep(step) {
     this.db
       .prepare(
-        `INSERT INTO steps (id, objective_id, title, description, status, is_blocked, blocked_reason, created_at, completed_at, sort_order)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO steps (id, objective_id, title, description, status, is_blocked, blocked_reason, created_at, completed_at, sort_order, due_date, due_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         step.id,
@@ -452,6 +468,7 @@ export class QuestJournalStore {
         step.created_at,
         step.completed_at,
         step.sort_order,
+        step.due_date ?? null, step.due_at ?? null,
       );
   }
 
@@ -473,7 +490,7 @@ export class QuestJournalStore {
     const next = { ...current, ...patch };
     this.db
       .prepare(
-        `UPDATE steps SET title = ?, description = ?, status = ?, is_blocked = ?, blocked_reason = ?, completed_at = ?, sort_order = ? WHERE id = ?`,
+        `UPDATE steps SET title = ?, description = ?, status = ?, is_blocked = ?, blocked_reason = ?, completed_at = ?, sort_order = ?, due_date = ?, due_at = ? WHERE id = ?`,
       )
       .run(
         next.title,
@@ -483,6 +500,7 @@ export class QuestJournalStore {
         next.blocked_reason,
         next.completed_at,
         next.sort_order,
+        next.due_date, next.due_at,
         id,
       );
     return next;
@@ -583,6 +601,7 @@ export class QuestJournalStore {
 export class QuestJournalService {
   constructor(store) {
     this.store = store;
+    this.todos = new TodoJournal(this);
   }
 
   // -- helpers -----------------------------------------------------------------
@@ -683,6 +702,7 @@ export class QuestJournalService {
       blocked_reason: null,
       created_at: now(),
       completed_at: null,
+      due_date: null, due_at: null, ...validateDeadline(input),
       archived_at: null,
       sort_order: this._nextSortOrder("quest"),
     };
@@ -721,6 +741,7 @@ export class QuestJournalService {
       blocked_reason: null,
       created_at: now(),
       completed_at: null,
+      due_date: null, due_at: null, ...validateDeadline(input),
       sort_order: this._nextSortOrder("objective", questId),
     };
     this.store.transaction(() => {
@@ -757,6 +778,7 @@ export class QuestJournalService {
       blocked_reason: null,
       created_at: now(),
       completed_at: null,
+      due_date: null, due_at: null, ...validateDeadline(input),
       sort_order: this._nextSortOrder("step", objectiveId),
     };
     this.store.transaction(() => {
@@ -786,7 +808,7 @@ export class QuestJournalService {
     this._guardNotArchived(questId);
 
     if (!isRecord(input)) fail("input must be an object", "INVALID_INPUT");
-    const patch = {};
+    const patch = validateDeadline(input);
     if (input.priority !== undefined && !["P0", "P1", "P2"].includes(input.priority)) fail("Invalid priority", "INVALID_PRIORITY");
     if (input.sort_order !== undefined) {
       if (!Number.isSafeInteger(input.sort_order) || input.sort_order < 0) fail("Invalid sort order", "INVALID_SORT_ORDER");
@@ -1194,6 +1216,12 @@ export class QuestJournalService {
 
   _applyOne(change, source) {
     switch (change.op) {
+      case "create_todo": return {op:change.op, node:this.todos.create(change,source)};
+      case "update_todo": return {op:change.op, node:this.todos.update(change.todo_id,change,source)};
+      case "convert_todo": return {op:change.op, node:this.todos.convert(change.todo_id,change,source)};
+      case "undo_todo_conversion": return {op:change.op, node:this.todos.undoConversion(change.todo_id,source,change.target_id)};
+      case "delete_todo": return {op:change.op, node:this.todos.remove(change.todo_id,source)};
+      case "restore_todo": return {op:change.op, node:this.todos.restore(change.todo_id,source)};
       case "reorder_node": {
         const mode = change.sort_mode ?? "manual";
         const node = this.reorderNode(change.node_type,change.node_id,change.parent_id ?? null,change.target_id ?? null,change.position,source,mode);

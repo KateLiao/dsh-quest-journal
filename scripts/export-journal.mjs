@@ -87,6 +87,7 @@ try {
     steps: rows("SELECT * FROM steps ORDER BY objective_id, sort_order, created_at"),
     attachments: rows("SELECT * FROM attachments ORDER BY created_at"),
     events: rows("SELECT * FROM events ORDER BY created_at, id"),
+    ...Object.fromEntries(["todos","todo_events"].filter(table=>db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name=?").get(table)).map(table=>[table,rows(`SELECT * FROM ${table} ORDER BY created_at, id`)])),
   };
 } finally {
   db.close();

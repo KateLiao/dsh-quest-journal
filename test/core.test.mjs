@@ -320,9 +320,9 @@ test("link edits and block reason changes validate and persist",()=>{
 });
 test("v0.1 database migration preserves existing rows",()=>{
   const {store,dbPath,service}=freshService();const q=service.createQuest({title:"Old"});
-  for(const table of ["quests","objectives","steps"]){store.db.exec(`ALTER TABLE ${table} DROP COLUMN priority`);store.db.exec(`ALTER TABLE ${table} DROP COLUMN updated_at`);}
+  for(const table of ["quests","objectives","steps"]){store.db.exec(`ALTER TABLE ${table} DROP COLUMN priority`);store.db.exec(`ALTER TABLE ${table} DROP COLUMN updated_at`);store.db.exec(`ALTER TABLE ${table} DROP COLUMN due_date`);store.db.exec(`ALTER TABLE ${table} DROP COLUMN due_at`);}
   store.close();const migrated=new QuestJournalStore(dbPath);
-  const old=migrated.getQuest(q.id);assert.equal(old.title,"Old");assert.equal(old.priority,"P1");assert.equal(old.updated_at,old.created_at);migrated.close();
+  const old=migrated.getQuest(q.id);assert.equal(old.title,"Old");assert.equal(old.priority,"P1");assert.equal(old.updated_at,old.created_at);assert.equal(old.due_date,null);assert.equal(old.due_at,null);migrated.close();
 });
 
 console.log(`\n${passed} passed, ${failed} failed`);

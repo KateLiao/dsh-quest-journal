@@ -52,7 +52,8 @@ with tempfile.TemporaryDirectory(prefix='qj-native-drag-') as directory:
     (work/'runtime.mjs').write_text(runtime)
     (work/'vendor.mjs').write_text(vendor_source)
     (work/'client.mjs').write_text((root/'packages/dsh-client-ui-quest-journal/lib/client.js').read_text())
-    shutil.copyfile(root/'test/browser-drag-harness.mjs', work/'harness.mjs')
+    shutil.copyfile(root/os.environ.get('QJ_BROWSER_HARNESS','test/browser-drag-harness.mjs'), work/'harness.mjs')
+    (work/'web.mjs').write_text((root/'packages/dsh-quest-journal/lib/web.js').read_text())
     (work/'index.html').write_text('<!doctype html><meta charset="utf-8"><style>html,body,#root{margin:0;height:100%;background:#171410}</style><div id="root"></div><script type="module" src="./harness.mjs"></script>')
     profile = work/'profile'
     with open(work/'chrome.log', 'w') as log:
@@ -66,7 +67,7 @@ with tempfile.TemporaryDirectory(prefix='qj-native-drag-') as directory:
                     raise RuntimeError('Chrome exited; '+(work/'chrome.log').read_text())
                 time.sleep(.05)
             port = endpoint.read_text().splitlines()[0]
-            subprocess.run([node, str(root/'test/browser-drag.test.mjs')], env={**os.environ, 'QJ_BROWSER_PORT': port}, check=True, timeout=60)
+            subprocess.run([node, str(root/os.environ.get('QJ_BROWSER_TEST','test/browser-drag.test.mjs'))], env={**os.environ, 'QJ_BROWSER_PORT': port,'QJ_WEB_MODULE':(work/'web.mjs').as_uri()}, check=True, timeout=60)
         finally:
             if process.poll() is None:
                 process.terminate()

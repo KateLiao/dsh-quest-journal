@@ -173,3 +173,11 @@ Agent 通过以下 `quest_*` 工具操作任务日志。所有工具在进程内
 `position` 为 `before` / `after` / `end`，`end` 时不传 `target_id`。Quest 的 `parent_id` 为 null；Objective 的父节点必须是所属 Quest；Step 可移动到同 Quest 内其他 Objective。节点身份、状态与附件保持不变，按最新同级列表原子重排；归档、跨 Quest、错误/失效锚点拒绝。自然语言计划的操作白名单暂未新增排序，面板拖拽及常规 Agent 批量工具可用。
 
 Quest 的 `reorder_node` 可额外传 `sort_mode`（manual/priority/updated/created）；响应结果包含有效 `sort_mode`，排序规则被打乱时为 manual（UI 显示“－”），否则保留请求模式。服务端以该排序模式的完整活动列表作为移动基础。
+
+## v0.5.0 · TODO 与截止日期
+
+- `quest_list_todos`：无参数，返回未删除 TODO（包含已完成和已转入记录），用于获取精确 ID。
+- `quest_update_node` 和 `update_node`：接受 `due_date`（YYYY-MM-DD 或 null）或 `due_at`（epoch ms 或 null），互斥；均 null 清除。不改写建立/完成时间，不推断未给出的日期。
+- `quest_apply_changes` 新增：`create_todo`（title、request_id，可选 quest_id/objective_id/deadline）、`update_todo`（todo_id、title/completed/deadline，可选 expected_updated_at）、`convert_todo`（todo_id、quest_id，可选 objective_id/expected_updated_at）、`undo_todo_conversion`（todo_id，可选 target_id 作为旧操作保护）、`delete_todo` / `restore_todo`（todo_id）。
+- `request_id` 为 8–100 字符的字母、数字、下划线或连字符。同一请求重试复用 ID，改动内容使用新 ID。建立时带 quest_id 即一次性保存并转入；选 objective_id 则作为进展，否则作为新目标。
+- 完成状态独立；转换不自动完成/重开父项。转入后操作真实节点，已转入 TODO 是来源记录。归档保护、失败回滚和安全撤销规则与界面一致，历史来源为 agent。

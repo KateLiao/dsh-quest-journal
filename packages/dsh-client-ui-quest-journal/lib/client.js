@@ -36,6 +36,7 @@ window.__ModuleLoader__.load({
     }
 
     const api = {
+      listTodos: async () => (await call("/todos")).todos ?? [],
       listQuests: async (options) => (await call("/state?archived=" + (options && options.includeArchived ? "1" : "0"))).quests,
       getQuest: async (id) => (await call("/quest?id=" + encodeURIComponent(id))).quest,
       getTrace: async (id) => (await call("/trace?id=" + encodeURIComponent(id))).events,
@@ -351,6 +352,110 @@ window.__ModuleLoader__.load({
       return h('input',{className:'qj-inline-new',autoFocus:true,'aria-label':'新条目标题',placeholder:'输入标题，Enter 保存并继续',value,onChange:e=>setValue(e.target.value),onBlur:()=>commit(false),onKeyDown:e=>{if(e.nativeEvent?.isComposing)return;if(e.key==='Escape'){e.preventDefault();onCancel();}if(e.key==='Enter'){e.preventDefault();commit(true);}}});
     }
 
+    const fullDate = value => value == null ? '未记录' : new Date(value).toLocaleString('zh-CN',{year:'numeric',month:'2-digit',day:'2-digit',weekday:'short',hour:'2-digit',minute:'2-digit',hour12:false});
+    const localDay = value => {const d=new Date(value);return [d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');};
+    const localInput = value => {const d=new Date(value);return localDay(value)+'T'+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0');};
+    function deadlineLabel(node) {
+      if (!node.due_date && node.due_at == null) return null;
+      if (node.status==='completed') return {label:'已完成',kind:'done'};
+      const today=localDay(Date.now()),day=node.due_date||localDay(node.due_at);
+      const overdue=node.due_date ? day<today : node.due_at<Date.now();
+      if(overdue){const days=Math.round((Date.parse(today)-Date.parse(day))/86400000);return {label:days>0?'◷ 逾期 '+days+' 天':'◷ 已逾期',kind:'overdue'};}
+      return {label:'◷ '+(day===today?'今天':day.slice(5).replace('-','/'))+(node.due_at!=null?' '+new Date(node.due_at).toLocaleTimeString('zh-CN',{hour:'2-digit',minute:'2-digit',hour12:false}):'')+' 截止',kind:day===today?'today':''};
+    }
+    function DeadlineBadge({node,onClick}) {const d=deadlineLabel(node);return d?h('button',{type:'button',className:'qj-deadline '+d.kind,onClick,'aria-label':'时间与截止日期：'+node.title},d.label):null;}
+    function keepDialogFocus(e) {
+      if(e.key!=='Tab')return;
+      const items=Array.from(e.currentTarget.querySelectorAll('button:not(:disabled),input:not(:disabled),select:not(:disabled)')).filter(el=>el.getClientRects().length);
+      const first=items[0],last=items.at(-1);
+      if(e.shiftKey&&window.document.activeElement===first){e.preventDefault();last?.focus();}
+      else if(!e.shiftKey&&window.document.activeElement===last){e.preventDefault();first?.focus();}
+    }
+    function TimeCard({node,parent,onSave,onClose,readonly=false}) {
+      const [mode,setMode]=react.useState(node.due_at!=null?'time':'date'),[value,setValue]=react.useState(node.due_date||(node.due_at!=null?localInput(node.due_at):'')),[error,setError]=react.useState(''),[saving,setSaving]=react.useState(false);
+      const gate=react.useRef(false);
+      const patch=()=>!value?{due_date:null,due_at:null}:mode==='date'?{due_date:value,due_at:null}:{due_date:null,due_at:new Date(value).getTime()};
+      const lateParent=()=>{if(!parent||!value)return false;const own=mode==='date'?Date.parse(value+'T23:59:59'):new Date(value).getTime();const end=parent.due_date?Date.parse(parent.due_date+'T23:59:59'):parent.due_at;return end!=null&&own>end;};
+      const save=async clear=>{if(gate.current)return;const data=clear?{due_date:null,due_at:null}:patch();if(data.due_at!=null&&!Number.isFinite(data.due_at)){setError('请选择有效时间。');return;}gate.current=true;setSaving(true);setError('');try {if(await onSave(data))onClose();else setError('保存未成功，请检查提示后重试。');}catch(e){setError(e.message);}finally{gate.current=false;setSaving(false);}};
+      return h('section',{className:'qj-time-card','aria-label':'时间与截止日期',onKeyDown:e=>{if(e.key==='Escape'){e.stopPropagation();onClose();}}},
+        h('div',{className:'qj-time-head'},h('span',null,'时间与截止日期'),h('button',{className:'qj-icon','aria-label':'收起时间信息',onClick:onClose},'×')),
+        h('dl',null,...[['建立时间',fullDate(node.created_at)],['最近更新',fullDate(node.updated_at)],['完成时间',node.status==='completed'?fullDate(node.completed_at):'尚未完成']].map(([k,v])=>h('div',{key:k},h('dt',null,k),h('dd',null,v)))),
+        h('div',{className:'qj-deadline-edit'},h('span',null,'DDL'),h('select',{'aria-label':'截止日期类型',value:mode,disabled:readonly||saving,onChange:e=>{const next=e.target.value;setMode(next);setValue(value?(next==='date'?value.slice(0,10):value.slice(0,10)+'T18:00'):'');}},h('option',{value:'date'},'按日'),h('option',{value:'time'},'具体时间')),
+          h('input',{'aria-label':'截止日期',type:mode==='date'?'date':'datetime-local',value,disabled:readonly||saving,onChange:e=>setValue(e.target.value)}),
+          !readonly?h('button',{className:'qj-primary',disabled:saving,onClick:()=>save(false)},saving?'保存中…':'保存'):null,
+          !readonly?h('button',{className:'qj-mini',disabled:saving,onClick:()=>save(true)},'清除'):null),
+        h('small',null,readonly?'当前为只读状态':mode==='date'?'按日截止，包含当天；以本地时区计算。':'以本地时区选择，按具体时间截止。'),lateParent()?h('p',{className:'qj-time-warning'},'截止日期晚于上级事项，仍可保存；不会自动调整上级日期。'):null,error?h('p',{role:'alert',className:'qj-time-warning'},error):null);
+    }
+
+    function TodoItem({todo,mutate,onConvert,timeOpen,setTimeOpen,disabled}) {
+      const [menu,setMenu]=react.useState(false),[editing,setEditing]=react.useState(false),[title,setTitle]=react.useState(todo.title);
+      const update=patch=>mutate({op:'update_todo',todo_id:todo.id,expected_updated_at:todo.updated_at,...patch});
+      const saveTitle=async()=>{if(!title.trim())return;if(await update({title:title.trim()}))setEditing(false);};
+      return h('article',{className:'qj-todo-item'+(todo.status==='completed'?' is-done':''),onContextMenu:e=>{e.preventDefault();setMenu(true);}},
+        h('div',{className:'qj-todo-row'},h('button',{className:'qj-check','aria-label':todo.status==='completed'?'取消完成 TODO':'完成 TODO',disabled,onClick:()=>update({completed:todo.status!=='completed'})},todo.status==='completed'?'✓':''),
+          editing?h('input',{'aria-label':'编辑 TODO 标题',value:title,autoFocus:true,disabled,onChange:e=>setTitle(e.target.value),onKeyDown:e=>{if(e.nativeEvent?.isComposing)return;if(e.key==='Enter'){e.preventDefault();saveTitle();}if(e.key==='Escape')setEditing(false);}}):h('span',{className:'qj-todo-title',onDoubleClick:()=>{setTitle(todo.title);setEditing(true);}},todo.title),
+          editing?h('button',{className:'qj-mini',disabled:disabled||!title.trim(),onClick:saveTitle},'保存'):h('button',{className:'qj-icon','aria-label':'TODO 操作：'+todo.title,'aria-expanded':menu,onClick:()=>setMenu(!menu)},'···')),
+        menu?h('div',{className:'qj-todo-menu',onKeyDown:e=>{if(e.key==='Escape')setMenu(false);}},
+          h('button',{className:'qj-menu-item',onClick:()=>{setMenu(false);setTimeOpen(timeOpen===todo.id?null:todo.id);}},'时间与截止日期'),
+          h('button',{className:'qj-menu-item',disabled,onClick:()=>{setMenu(false);setTitle(todo.title);setEditing(true);}},'编辑标题'),
+          h('button',{className:'qj-menu-item',disabled,onClick:()=>{setMenu(false);mutate({op:'delete_todo',todo_id:todo.id},{text:'TODO 已删除',undo:{op:'restore_todo',todo_id:todo.id}});}},'删除 TODO')):null,
+        h('div',{className:'qj-todo-foot'},todo.due_date||todo.due_at!=null?h(DeadlineBadge,{node:todo,onClick:()=>setTimeOpen(timeOpen===todo.id?null:todo.id)}):h('button',{className:'qj-todo-link qj-muted',onClick:()=>setTimeOpen(timeOpen===todo.id?null:todo.id)},'＋ 截止日期'),h('button',{className:'qj-todo-link',disabled,onClick:()=>onConvert(todo)},'转入 quest ↗')),
+        timeOpen===todo.id?h(TimeCard,{key:todo.id,node:todo,readonly:disabled,onClose:()=>setTimeOpen(null),onSave:data=>update(data)}):null);
+    }
+
+    function TodoDrawer({open,todos,quests,currentId,blockedId,onClose,onMutation,onView,timeOpen,setTimeOpen,onNotice}) {
+      const [text,setText]=react.useState(''),[captureQuest,setCaptureQuest]=react.useState(''),[capturePosition,setCapturePosition]=react.useState(''),[captureTree,setCaptureTree]=react.useState(null),[captureError,setCaptureError]=react.useState('');
+      const [moving,setMoving]=react.useState(null),[questId,setQuestId]=react.useState(''),[position,setPosition]=react.useState(''),[tree,setTree]=react.useState(null),[treeError,setTreeError]=react.useState(''),[questSearch,setQuestSearch]=react.useState(''),[busy,setBusy]=react.useState(false),[error,setError]=react.useState('');
+      const focusPending=react.useRef(false);
+      const lock=react.useRef(false),retry=react.useRef(null),input=react.useRef(null),questSelect=react.useRef(null);
+      const activeQuests=quests.filter(q=>q.archived_at==null);
+      react.useEffect(()=>{if(open)input.current?.focus();},[open]);
+      react.useEffect(()=>{if(open&&!busy&&focusPending.current){focusPending.current=false;input.current?.focus();}},[open,busy,text]);
+      react.useEffect(()=>{let live=true;setCaptureTree(null);setCapturePosition('');setCaptureError('');if(captureQuest)api.getQuest(captureQuest).then(q=>{if(live)setCaptureTree(q);}).catch(e=>{if(live)setCaptureError(e.message);});return()=>{live=false;};},[captureQuest]);
+      react.useEffect(()=>{let live=true;setTree(null);setPosition('');setTreeError('');if(moving&&questId)api.getQuest(questId).then(q=>{if(live)setTree(q);}).catch(e=>{if(live)setTreeError(e.message);});return()=>{live=false;};},[moving?.id,questId]);
+      react.useEffect(()=>{if(moving)questSelect.current?.focus();},[moving?.id]);
+      const mutate=async(change,notice)=>{
+        if(lock.current)return null;lock.current=true;setBusy(true);setError('');
+        try {const results=await api.applyChanges([change]);await onMutation();if(notice)onNotice(notice);return results[0]?.node||{};}catch(e){setError(e.message);return null;}finally{lock.current=false;setBusy(false);}
+      };
+      const beginMove=todo=>{setQuestSearch('');setMoving(todo);setQuestId(activeQuests.some(q=>q.id===currentId)?currentId:activeQuests[0]?.id||'');setError('');};
+      const convertedNotice=t=>({text:'已转入 quest',todo:t,undo:{op:'undo_todo_conversion',todo_id:t.id,target_id:t.target_id}});
+      const capture=async e=>{e.preventDefault();if(e.nativeEvent?.isComposing||!text.trim())return;
+        const data={title:text.trim(),...(captureQuest?{quest_id:captureQuest,...(capturePosition?{objective_id:capturePosition}:{})}:{})},fingerprint=JSON.stringify(data);
+        if(retry.current?.fingerprint!==fingerprint)retry.current={fingerprint,id:window.crypto.randomUUID()};
+        const result=await mutate({op:'create_todo',request_id:retry.current.id,...data});if(result){focusPending.current=true;setText('');retry.current=null;if(result.converted_at)onNotice(convertedNotice(result));input.current?.focus();}
+      };
+      const confirmMove=async()=>{const result=await mutate({op:'convert_todo',todo_id:moving.id,expected_updated_at:moving.updated_at,quest_id:questId,...(position?{objective_id:position}:{})});if(result){setMoving(null);onNotice(convertedNotice(result));}};
+      const pending=todos.filter(t=>!t.converted_at&&t.status!=='completed'),done=todos.filter(t=>!t.converted_at&&t.status==='completed'),converted=todos.filter(t=>t.converted_at);
+      const choices=(value,onChange,ref,search='')=>h('select',{ref,'aria-label':'关联 quest',value,disabled:busy,onChange:e=>onChange(e.target.value)},h('option',{value:''},'不关联 quest'),...activeQuests.filter(q=>!search||q.title.toLowerCase().includes(search.toLowerCase())||q.id===value).map(q=>h('option',{key:q.id,value:q.id},q.title+(q.status==='completed'?'（已完成）':''))));
+      const positions=(value,onChange,quest,loading)=>h('select',{'aria-label':'放置位置',value,disabled:busy||loading,onChange:e=>onChange(e.target.value)},h('option',{value:''},'作为新目标'),...(quest?.objectives??[]).map(o=>h('option',{key:o.id,value:o.id},'作为进展 · '+o.title)));
+      return h(react.Fragment,null,
+        h('section',{id:'qj-todo-drawer',className:'qj-todo-drawer',hidden:!open,'aria-label':'快速 TODO',onKeyDown:e=>{if(e.key==='Escape'&&!moving){e.stopPropagation();onClose();}}},
+          h('div',{className:'qj-todo-heading'},h('div',null,h('h2',null,'快速 TODO ',h('span',{className:'qj-todo-count'},pending.length)),h('small',null,'先记下来，准备好再放进任务。')),h('button',{className:'qj-icon','aria-label':'关闭快速 TODO',onClick:onClose},'×')),
+          h('div',{className:'qj-todo-body'},h('form',{className:'qj-todo-capture',onSubmit:capture},
+            h('input',{ref:input,'aria-label':'记录 TODO',placeholder:'有什么需要记一下？',value:text,disabled:busy,onChange:e=>{setText(e.target.value);setError('');},onKeyDown:e=>{if(e.key==='Enter'&&e.nativeEvent?.isComposing)e.preventDefault();}}),
+            choices(captureQuest,setCaptureQuest),captureQuest?positions(capturePosition,setCapturePosition,captureTree,!captureTree):null,
+            captureQuest===blockedId?h('small',{className:'qj-time-warning'},'请先确认或取消此 quest 的 DSH 预览。'):null,
+            captureTree?.status==='completed'?h('small',{className:'qj-time-warning'},'此 quest 已完成；转入不会自动重新打开它。'):null,
+            captureError?h('small',{role:'alert'},captureError):null,
+            h('button',{className:'qj-primary',type:'submit',disabled:busy||!text.trim()||!!captureQuest&&(!captureTree||captureTree.archived_at!=null||captureQuest===blockedId)},busy?'保存中…':captureQuest?'保存并转入':'记录 TODO')),
+            error?h('div',{className:'qj-error',role:'alert'},error):null,
+            h('div',{className:'qj-todo-list-title'},'待整理',h('small',null,'Enter 快速记录')),
+            !pending.length?h('p',{className:'qj-todo-empty'},'待办都整理好了，可以继续随手记录。'):null,
+            ...pending.map(todo=>h(TodoItem,{key:todo.id,todo,mutate,onConvert:beginMove,timeOpen,setTimeOpen,disabled:busy})),
+            h('details',{className:'qj-todo-history'},h('summary',null,'已完成 · '+done.length),...done.map(todo=>h(TodoItem,{key:todo.id,todo,mutate,onConvert:beginMove,timeOpen,setTimeOpen,disabled:busy}))),
+            h('details',{className:'qj-todo-history'},h('summary',null,'已转入 · '+converted.length),...converted.map(todo=>h('div',{key:todo.id,className:'qj-todo-converted'},h('span',null,todo.title),h('small',null,quests.find(q=>q.id===todo.quest_id)?.title||'原 quest 已不存在'),h('button',{className:'qj-todo-link',onClick:()=>onView(todo)},'查看事项 ↗'))))),
+          h('div',{className:'qj-todo-drawer-foot'},'转入后保留原建立时间、完成状态和截止日期。')),
+        moving?h('div',{className:'qj-modal-shade'},h('section',{className:'qj-todo-dialog',role:'dialog','aria-modal':true,'aria-label':'转入 quest',onKeyDown:e=>{keepDialogFocus(e);if(e.key==='Escape'&&!busy){e.stopPropagation();setMoving(null);input.current?.focus();}}},
+          h('div',{className:'qj-todo-dialog-body'},h('h2',null,'转入 quest'),h('p',null,moving.title),h('label',null,'关联 quest',h('input',{'aria-label':'搜索关联 quest',placeholder:'搜索 quest',value:questSearch,onChange:e=>setQuestSearch(e.target.value)}),choices(questId,setQuestId,questSelect,questSearch)),h('label',null,'放置位置',positions(position,setPosition,tree,!tree)),
+            h('div',{className:'qj-transfer-path'},'转入后的位置',h('p',null,(tree?.title||'请选择 quest')+' → '+(position?(tree?.objectives.find(o=>o.id===position)?.title||'目标已失效')+' → ':'新目标 → ')+moving.title)),
+            moving.status==='completed'?h('p',{className:'qj-time-warning'},'此 TODO 已完成，转入后保留完成状态。'):null,
+            tree?.status==='completed'?h('p',{className:'qj-time-warning'},'此 quest 已完成；转入不会自动重新打开它。'):null,
+            questId===blockedId?h('p',{className:'qj-time-warning'},'请先确认或取消此 quest 的 DSH 预览。'):null,
+            h('small',null,'从待整理移除，保留原时间与状态，转入后可撤销。'),treeError||error?h('div',{className:'qj-error',role:'alert'},treeError||error):null),
+          h('div',{className:'qj-todo-dialog-foot'},h('button',{className:'qj-mini',disabled:busy,onClick:()=>{setMoving(null);input.current?.focus();}},'取消'),h('button',{className:'qj-primary',disabled:busy||!tree||tree.archived_at!=null||questId===blockedId,onClick:confirmMove},busy?'正在转入…':'确认转入')))):null);
+    }
+
     function QuestJournalPage({t}) {
       const [tab,setTab]=react.useState("active"), [quests,setQuests]=react.useState([]), [selected,setSelected]=react.useState(null);
       const [detail,setDetail]=react.useState(null), [trace,setTrace]=react.useState([]), [error,setError]=react.useState(null);
@@ -358,18 +463,23 @@ window.__ModuleLoader__.load({
       const [form,setForm]=react.useState(null), [busy,setBusy]=react.useState(false);
       const [menu,setMenu]=react.useState(null),[info,setInfo]=react.useState({}),[collapsed,setCollapsed]=react.useState({}),[hideDone,setHideDone]=react.useState(false),[draft,setDraft]=react.useState(null),[commandPlan,setCommandPlan]=react.useState(null);
       const [dragging,setDragging]=react.useState(null),[dropMark,setDropMark]=react.useState(null),[newOpen,setNewOpen]=react.useState(false);
+      const [todoOpen,setTodoOpen]=react.useState(false),[todos,setTodos]=react.useState([]),[timeOpen,setTimeOpen]=react.useState(null),[notice,setNotice]=react.useState(null),[fresh,setFresh]=react.useState(null);
+      const [,setClock]=react.useState(0);
+      const todoTrigger=react.useRef(null),noticeGate=react.useRef(false);
       const generation=react.useRef(0), drag=react.useRef(null), locked=react.useRef(false), selectedRef=react.useRef(selected),dropRef=react.useRef(null),dragBlocked=react.useRef(false),suppressClick=react.useRef(0);
       selectedRef.current=selected;
+      react.useEffect(()=>{const timer=window.setInterval?.(()=>setClock(v=>v+1),60000);return()=>window.clearInterval?.(timer);},[]);
+      react.useEffect(()=>{if(!fresh)return;const scroll=window.setTimeout?.(()=>window.document?.querySelector('[data-drag-id="'+fresh+'"]')?.scrollIntoView({block:'nearest'}),100);const timer=window.setTimeout?.(()=>setFresh(null),6000);return()=>{window.clearTimeout?.(scroll);window.clearTimeout?.(timer);};},[fresh,detail?.id]);
       const refresh=react.useCallback(async()=>{
         if(selectedRef.current!==selected)return;
         const token=++generation.current;
         try {
-          const list=await api.listQuests({includeArchived:true});
+          const [list,todoList]=await Promise.all([api.listQuests({includeArchived:true}),api.listTodos()]);
           const exists=selected && list.some(q=>q.id===selected);
           const tree=exists ? await api.getQuest(selected):null;
           const events=tree ? await api.getTrace(selected):[];
           if (!exists && token===generation.current) setSelected(null);
-          if (token===generation.current) {setQuests(list);setDetail(tree);setTrace(events);}
+          if (token===generation.current) {setQuests(list);setTodos(todoList);setDetail(tree);setTrace(events);}
         } catch(e) {if(token===generation.current)setError(e.message);}
       },[selected]);
       react.useEffect(()=>{setDetail(null);refresh(); const focus=()=>refresh();window.addEventListener("focus",focus);return()=>{generation.current++;window.removeEventListener("focus",focus);};},[refresh]);
@@ -378,6 +488,11 @@ window.__ModuleLoader__.load({
         locked.current=true;setBusy(true);setError(null);
         try {const results=await api.applyChanges(changes);onSaved?.(results);await refresh();return true;}catch(e){setError(e.message);return false;}finally{locked.current=false;setBusy(false);}
       };
+      const closeTodo=()=>{setTodoOpen(false);todoTrigger.current?.focus();};
+      const todoChanged=async()=>{setTodos(await api.listTodos());await refresh();};
+      const todoView=async todo=>{try{const tree=await api.getQuest(todo.quest_id);const found=tree.objectives.some(o=>o.id===todo.target_id||o.steps.some(step=>step.id===todo.target_id));if(!found)throw new Error('转入的事项已被删除，原 TODO 记录仍保留。');setCommandPlan(null);setTimeOpen(null);setTab(tree.archived_at!=null?'archived':'active');setSearch('');setFilter('all');setHideDone(false);setCollapsed({});setFresh(todo.target_id);setSelected(todo.quest_id);closeTodo();}catch(e){setError(e.message);setNotice({text:e.message});}};
+      const todoNotice=value=>{setNotice(value);if(value.todo){setHideDone(false);setCollapsed({});setFresh(value.todo.target_id);}};
+      const undoTodo=async()=>{if(noticeGate.current||!notice?.undo)return;noticeGate.current=true;setError(null);try{await api.applyChanges([notice.undo]);await todoChanged();setNotice({text:'已撤销，TODO 已恢复'});setFresh(null);}catch(e){setError(e.message);setNotice({...notice,text:e.message});}finally{noticeGate.current=false;}};
       const ask=(label,build,initial="")=>setForm({label,build,value:initial});
       const save=(type,id,title)=>apply([{op:"update_node",node_type:type,node_id:id,title}]);
       const addQuest=()=>{endDrag();setNewOpen(true);};
@@ -397,7 +512,6 @@ window.__ModuleLoader__.load({
       const readOnly=archived||previewing;
       const changedTree=o=>!!o._preview||o.steps.some(s=>s._preview);
       const showNode=node=>!hideDone||node.status!=="completed"||!!node._preview;
-      const metadata=node=>h("small",{className:"qj-dates"},"添加 "+dateLabel(node.created_at)+" · 更新 "+dateLabel(node.updated_at??node.created_at));
       const remove=(type,node)=>ask("删除“"+node.title+"”及其子条目？输入 删除 确认",value=>{if(value!=="删除")throw new Error("请输入 删除 确认");return [{op:"delete_node",node_type:type,node_id:node.id}];});
       const attachment=(type,id,kind)=>ask(kind==="link"?"添加链接（https://…）":"添加备注",value=>[{op:"add_attachment",node_type:type,node_id:id,type:kind,content:value}]);
       const block=(node,type)=>{
@@ -408,7 +522,7 @@ window.__ModuleLoader__.load({
       const menuButton=(label,fn,disabled=false)=>h("button",{className:"qj-menu-item",disabled:disabled||busy,onClick:()=>{setMenu(null);fn();}},label);
       const clearDrop=()=>{dropRef.current=null;setDropMark(null);};
       const endDrag=()=>{drag.current=null;dragBlocked.current=false;setDragging(null);clearDrop();};
-      const canDrag=type=>!busy&&!form&&!newOpen&&!previewing&&(type==="quest"?tab==="active":!archived);
+      const canDrag=type=>!todoOpen&&!timeOpen&&!busy&&!form&&!newOpen&&!previewing&&(type==="quest"?tab==="active":!archived);
       const beginDrag=(e,type,node,parentId)=>{
         const interactive=e.target?.closest?.('button,input,textarea,select,a,[contenteditable="true"]');
         if(!canDrag(type)||dragBlocked.current||interactive){e.preventDefault();return;}
@@ -461,7 +575,7 @@ window.__ModuleLoader__.load({
         }
         return drop?finishDrop(e,"objective",detail.id,o.id,o.title):hoverDrop(e,"objective",detail.id,o.id,o.title);
       };
-      const row=(node,type)=>h("div",{className:"qj-node"+(node._preview?" qj-preview-node qj-preview-"+node._preview.kind:"")+(node.status==="completed"?" is-done":"")},
+      const row=(node,type)=>h("div",{onContextMenu:e=>{if(!previewing){e.preventDefault();e.stopPropagation();setMenu(node.id);}},className:"qj-node"+(fresh===node.id?" qj-todo-fresh":"")+(node._preview?" qj-preview-node qj-preview-"+node._preview.kind:"")+(node.status==="completed"?" is-done":"")},
         h("div",{className:"qj-node-row"+(type!=="quest"&&canDrag(type)?" qj-grabbable":""),
           draggable:type!=="quest"&&canDrag(type),"data-drag-type":type,"data-drag-id":node.id,
           onPointerDownCapture:e=>{dragBlocked.current=!!e.altKey||!!e.target?.closest?.('button,input,textarea,select,a,[contenteditable="true"]');},
@@ -471,11 +585,13 @@ window.__ModuleLoader__.load({
           h(EditableTitle,{key:type+node.id,node,type,readonly:readOnly||busy,save,sibling,move}),
           node._preview?h("span",{className:"qj-change-label"},node._preview.label):null,
           (type==="quest"||node.priority!=="P1")?h("span",{className:"qj-priority"},node.priority):null,
+          h(DeadlineBadge,{node,onClick:()=>setTimeOpen(timeOpen===node.id?null:node.id)}),
           h("div",{className:"qj-row-actions"},
             type!=="step"?h("button",{className:"qj-icon qj-add-hover",disabled:readOnly||busy,"aria-label":type==="quest"?"添加目标":"添加进展",onClick:()=>add(type==="quest"?"objective":"step",node.id)},"＋"):null,
             h("button",{className:"qj-icon",disabled:previewing,"aria-label":"更多操作："+node.title,"aria-expanded":menu===node.id,onClick:()=>setMenu(menu===node.id?null:node.id)},"···")),
           !previewing&&menu===node.id?h("div",{className:"qj-menu",role:"group","aria-label":"条目操作",onKeyDown:e=>{if(e.key==="Escape")setMenu(null);}},
-            menuButton(info[node.id]?"收起详情与日期":"详情与日期",()=>setInfo({...info,[node.id]:!info[node.id]})),
+            menuButton("时间与截止日期",()=>setTimeOpen(timeOpen===node.id?null:node.id)),
+            menuButton(info[node.id]?"收起备注与链接":"备注与链接",()=>setInfo({...info,[node.id]:!info[node.id]})),
             menuButton("编辑标题",()=>ask("编辑标题",value=>[{op:"update_node",node_type:type,node_id:node.id,title:value}],node.title),readOnly),
             h("label",{className:"qj-menu-item"},"优先级",h("select",{"aria-label":"优先级",value:node.priority,disabled:readOnly||busy,onChange:e=>{setMenu(null);apply([{op:"update_node",node_type:type,node_id:node.id,priority:e.target.value}]);}},...["P0","P1","P2"].map(p=>h("option",{key:p},p)))),
             menuButton(node.is_blocked?"解除阻塞":"标记阻塞",()=>block(node,type),readOnly),
@@ -484,14 +600,15 @@ window.__ModuleLoader__.load({
             type!=="quest"?menuButton(type==="step"?"升级为目标":"降级为进展",()=>move(type,node,type==="step"),readOnly):null,
             type==="quest"?menuButton(readOnly?"恢复任务":"归档任务",()=>apply([{op:readOnly?"restore_quest":"archive_quest",quest_id:node.id}])):null,
             menuButton("删除条目…",()=>remove(type,node),readOnly)):null),
+        timeOpen===node.id?h(TimeCard,{key:node.id,node,parent:type==='step'?detail.objectives.find(o=>o.id===node.objective_id):type==='objective'?detail:null,readonly:readOnly||busy,onClose:()=>setTimeOpen(null),onSave:data=>apply([{op:'update_node',node_type:type,node_id:node.id,...data}])}):null,
         node.is_blocked?h("button",{className:"qj-block-line",disabled:readOnly||busy,onClick:()=>block(node,type)},"● 阻塞 · "+(node.blocked_reason||"未填写原因")):null,
         visibleDescription(node.description)?h("p",{className:"qj-desc"},visibleDescription(node.description)):null,
         node._preview?.details.length?h("div",{className:"qj-change-details"},node._preview.details.join(" · ")):null,
         !info[node.id]&&node.attachments?.length?h("button",{className:"qj-note-preview",onClick:()=>setInfo({...info,[node.id]:true})},"↳ "+(node.attachments.at(-1).title||node.attachments.at(-1).content)):null,
-        info[node.id]?h("div",{className:"qj-node-info"},metadata(node),...(node.attachments??[]).map(a=>h("div",{key:a.id,className:"qj-attach"},a.type==="link"?h("a",{href:a.content,target:"_blank",rel:"noreferrer"},a.title||a.content):a.content))):null);
+        info[node.id]?h("div",{className:"qj-node-info"},...(node.attachments??[]).map(a=>h("div",{key:a.id,className:"qj-attach"},a.type==="link"?h("a",{href:a.content,target:"_blank",rel:"noreferrer"},a.title||a.content):a.content))):null);
       let visible=quests.filter(q=>(tab==="archived"?q.archived_at!==null:q.archived_at===null)&&q.title.toLowerCase().includes(search.toLowerCase())&&(filter==="all"||filter===q.priority||filter===q.status||(filter==="blocked"&&q.is_blocked)));
       visible.sort((a,b)=>sort==="priority"?a.priority.localeCompare(b.priority)||a.sort_order-b.sort_order:sort==="updated"?b.updated_at-a.updated_at:sort==="created"?b.created_at-a.created_at:a.sort_order-b.sort_order);
-      return h("div",{className:"qj-page"+(dragging?" qj-drag-active":""),onDragOver:()=>{if(dropRef.current)clearDrop();},onDragLeave:e=>{if(e.target===e.currentTarget)clearDrop();}},h("style",null,CSS+`
+      return h("div",{className:"qj-page"+(todoOpen?" qj-todo-open":"")+(dragging?" qj-drag-active":""),onDragOver:()=>{if(dropRef.current)clearDrop();},onDragLeave:e=>{if(e.target===e.currentTarget)clearDrop();}},h("style",null,CSS+`
 .qj-page{--qj-bg:#171410;--qj-panel:#1e1a15;--qj-panel2:#272118;--qj-border:#353026;--qj-soft:#30291c;--qj-text:#e8e1d4;--qj-dim:#a59b89;--qj-faint:#958975;--qj-accent:#d4b360;grid-template-columns:270px minmax(0,1fr);font-size:14px}
 .qj-page button:focus-visible,.qj-page input:focus-visible,.qj-page select:focus-visible,.qj-page textarea:focus-visible{outline:2px solid var(--qj-accent);outline-offset:2px}
 .qj-page input,.qj-page select,.qj-page textarea{background:var(--qj-panel2);color:var(--qj-text);border:1px solid var(--qj-border);border-radius:5px;padding:7px;min-width:0;font:inherit}
@@ -504,11 +621,15 @@ window.__ModuleLoader__.load({
 .qj-outline-banner{display:flex;flex-direction:column;gap:4px;border:1px solid #d4b36066;border-radius:6px;padding:12px 15px;background:#d4b3600a;margin:12px 0;color:var(--qj-accent);font-size:12px}.qj-outline-banner span{font-size:11px;color:var(--qj-dim)}.qj-preview-node{border:1px solid #d4b36070;border-radius:6px;padding:8px 10px;margin:5px 0;background:#d4b3600b}.qj-preview-changed{border-color:#83abc675;background:#83abc60b}.qj-preview-moved{border-color:#b09cd375;background:#b09cd30b}.qj-preview-deleted{border:1px dashed #e09d8775;background:#e09d8709}.qj-preview-deleted .qj-node-title{text-decoration:line-through}.qj-change-label{font-size:10px;white-space:nowrap;color:var(--qj-accent);padding:2px 5px;border-radius:3px;background:#d4b36015;margin-top:2px}.qj-preview-changed .qj-change-label{color:#9fc5e0;background:#83abc615}.qj-preview-moved .qj-change-label{color:#c4afe5;background:#b09cd315}.qj-preview-deleted .qj-change-label{color:#e09d87;background:#e09d8715}.qj-change-details{font-size:11px;line-height:1.8;color:var(--qj-dim);margin:3px 0 5px 25px;overflow-wrap:anywhere}.qj-preview-node .qj-row-actions{display:none}.qj-page .qj-preview-node .qj-block-line:disabled{opacity:1}
 .qj-objective,.qj-step,.qj-end-zone{position:relative}.qj-grabbable{cursor:grab}.qj-grabbable .qj-node-title{cursor:grab}.qj-drag-active .qj-grabbable .qj-node-title{cursor:grabbing}.qj-grabbable input,.qj-grabbable textarea,.qj-grabbable [contenteditable=true]{cursor:text}.qj-drag-active .qj-grabbable,.qj-drag-active .qj-drag{cursor:grabbing}.qj-is-dragging{opacity:.35}.qj-drop-indicator{position:absolute;left:0;right:0;height:2px;background:var(--qj-accent);z-index:25;pointer-events:none;box-shadow:0 0 5px #d4b36050}.qj-drop-indicator.is-before{top:-3px}.qj-drop-indicator.is-after{bottom:-3px}.qj-drop-indicator.is-end{top:0}.qj-drop-indicator:before{content:'';position:absolute;left:0;top:-2px;width:6px;height:6px;border-radius:50%;background:var(--qj-accent)}.qj-drop-indicator>span{position:absolute;right:0;bottom:4px;background:var(--qj-soft);border:1px solid var(--qj-accent-dim);color:var(--qj-accent);padding:2px 6px;border-radius:4px;font-size:10px;line-height:1.6;max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.qj-end-zone{padding:10px 8px;margin:6px 0;color:var(--qj-dim);font-size:11px;border:1px dashed var(--qj-border);border-radius:4px;min-height:36px}.qj-end-zone.is-drop-target{background:#d4b3600b;color:var(--qj-accent)}.qj-drag-announcement{font-size:11px;color:var(--qj-accent);padding:8px 12px;overflow-wrap:anywhere}
 .qj-create-dialog{inset:5vh max(10vw,16px) auto;max-height:90vh;max-width:1000px;margin:0 auto;display:flex;flex-direction:column;overflow:hidden}.qj-create-flow{display:flex;flex-direction:column;min-height:0}.qj-create-scroll{overflow:auto;min-height:0}.qj-create-footer{flex:none;border-top:1px solid var(--qj-border);padding-top:12px}.qj-create-dialog>form{overflow:auto;min-height:0}.qj-create-footer .qj-primary{background:var(--qj-soft);color:var(--qj-accent);border-color:var(--qj-accent-dim)}.qj-create-heading{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:14px}.qj-create-heading h2{font-size:20px;margin:0;font-weight:500}.qj-create-tabs{display:flex;gap:8px;margin-bottom:18px}.qj-create-tabs button[aria-pressed=true]{color:var(--qj-accent);border-color:var(--qj-accent-dim);background:var(--qj-soft)}.qj-create-dialog .qj-command{margin-bottom:12px}.qj-create-dialog textarea{width:100%;display:block;margin:8px 0 14px;background:var(--qj-bg);resize:vertical;font:inherit;padding:10px;color:var(--qj-text);border:1px solid var(--qj-border);border-radius:5px}.qj-create-dialog .qj-command-actions button{margin:0}.qj-create-preview-node{border:1px solid #d4b36055;border-radius:6px;padding:10px 12px;margin:8px 0;background:#d4b36007}.qj-create-preview-node>div:first-child{display:flex;align-items:center;gap:8px;flex-wrap:wrap}.qj-create-preview-node strong{font-weight:450}.qj-create-preview-node p{font-size:12px;color:var(--qj-dim);white-space:pre-wrap;margin:7px 0}.qj-create-preview-children{margin:8px 0 0 18px}.qj-create-dialog .qj-priority{margin-left:auto}
+.qj-page{position:relative}.qj-todo-trigger{margin:14px 12px 4px;padding:11px 13px;display:flex;align-items:center;justify-content:space-between;gap:8px;background:transparent;color:var(--qj-text);border:1px solid var(--qj-border);border-radius:7px;font-size:12px;cursor:pointer;flex:none}.qj-todo-trigger[aria-pressed=true]{color:var(--qj-accent);border-color:var(--qj-accent-dim);background:var(--qj-soft);box-shadow:inset 3px 0 var(--qj-accent)}.qj-todo-count{font-size:10px;background:#d4b36019;color:var(--qj-accent);border-radius:4px;padding:2px 6px}.qj-todo-drawer{position:absolute;right:0;top:0;bottom:0;width:400px;max-width:100%;display:flex;flex-direction:column;background:var(--qj-panel);border-left:1px solid var(--qj-accent-dim);box-shadow:-12px 0 35px #0004;z-index:35}.qj-todo-drawer[hidden]{display:none}.qj-todo-heading{display:flex;align-items:flex-start;justify-content:space-between;padding:22px 22px 18px;flex:none}.qj-todo-heading h2,.qj-todo-dialog h2{margin:0 0 5px;font-size:18px;font-weight:500}.qj-todo-heading small,.qj-todo-dialog small{color:var(--qj-dim);font-size:11px}.qj-todo-body{padding:0 22px 22px;overflow:auto;min-height:0;flex:1}.qj-todo-capture{display:flex;flex-direction:column;gap:8px;background:var(--qj-bg);border:1px solid var(--qj-accent-dim);border-radius:8px;padding:12px;margin:0 0 24px}.qj-todo-capture>input{border:0;background:transparent;padding:3px 0 10px;width:100%;font-size:13px}.qj-todo-capture select{font-size:11px;width:100%}.qj-todo-capture .qj-primary{align-self:flex-end}.qj-todo-list-title{display:flex;justify-content:space-between;color:var(--qj-dim);font-size:12px}.qj-todo-list-title small{font-size:10px}.qj-todo-item{position:relative;border-bottom:1px solid var(--qj-border);padding:15px 0}.qj-todo-row{display:flex;align-items:flex-start;gap:9px}.qj-todo-row input{width:0;flex:1;font-size:12px}.qj-todo-title{flex:1;font-size:13px;line-height:1.8;overflow-wrap:anywhere}.qj-todo-item.is-done .qj-todo-title{color:var(--qj-dim);text-decoration:line-through}.qj-todo-foot{display:flex;justify-content:space-between;gap:8px;margin:8px 0 0 25px}.qj-todo-link{border:0;background:none;padding:2px 0;color:var(--qj-accent);font-size:11px;cursor:pointer}.qj-muted{color:var(--qj-dim)}.qj-todo-menu{margin:8px 0 8px 25px;border:1px solid var(--qj-border);border-radius:6px;background:var(--qj-panel2);padding:4px}.qj-todo-history{font-size:11px;color:var(--qj-dim);margin-top:20px}.qj-todo-history summary{cursor:pointer}.qj-todo-converted{display:flex;flex-direction:column;align-items:flex-start;gap:4px;border-bottom:1px solid var(--qj-border);padding:12px 0}.qj-todo-empty{font-size:12px;color:var(--qj-dim);padding:15px 0}.qj-todo-drawer-foot{border-top:1px solid var(--qj-border);padding:12px 22px;color:var(--qj-dim);font-size:10px;flex:none}.qj-todo-open .qj-right{margin-right:400px}.qj-modal-shade{position:fixed;inset:0;background:#0009;z-index:1100;display:flex;align-items:center;justify-content:center;padding:16px}.qj-todo-dialog{width:470px;max-width:100%;max-height:90vh;display:flex;flex-direction:column;background:var(--qj-panel2);border:1px solid var(--qj-accent-dim);border-radius:10px;padding:24px;box-shadow:0 18px 55px #0006}.qj-todo-dialog-body{overflow:auto;min-height:0}.qj-todo-dialog-body>p{font-size:13px;color:var(--qj-dim);overflow-wrap:anywhere}.qj-todo-dialog label{display:block;font-size:12px;color:var(--qj-dim);margin:18px 0 5px}.qj-todo-dialog select{width:100%;margin-top:6px;font-size:12px}.qj-transfer-path{border:1px solid var(--qj-accent-dim);border-radius:7px;background:#d4b36009;padding:12px;margin:20px 0 14px;color:var(--qj-dim);font-size:11px}.qj-transfer-path p{color:var(--qj-accent);font-size:12px;overflow-wrap:anywhere;margin:4px 0}.qj-todo-dialog-foot{display:flex;justify-content:flex-end;gap:8px;flex:none;padding-top:22px}.qj-todo-toast{position:absolute;bottom:18px;left:50%;transform:translateX(-50%);background:#30291c;border:1px solid var(--qj-accent-dim);box-shadow:0 8px 30px #0005;border-radius:8px;padding:9px 14px;display:flex;align-items:center;gap:14px;max-width:calc(100% - 24px);font-size:12px;z-index:1200}.qj-todo-fresh{border:1px solid var(--qj-accent-dim);border-radius:6px;background:#d4b3600a;padding:7px!important}.qj-deadline{background:none;border:1px solid var(--qj-border);border-radius:5px;padding:3px 7px;color:var(--qj-dim);font-size:10px;white-space:nowrap;flex:none;margin-top:2px;cursor:pointer}.qj-deadline.today{color:var(--qj-accent);border-color:var(--qj-accent-dim)}.qj-deadline.overdue{color:#e6a08b;border-color:#794b3b}.qj-time-card{margin:10px 0 12px 25px;background:var(--qj-panel2);border:1px solid var(--qj-accent-dim);border-radius:7px;padding:13px 15px;font-size:12px}.qj-time-head{display:flex;align-items:center;justify-content:space-between;color:var(--qj-accent);font-size:11px}.qj-time-card dl{margin:8px 0 14px}.qj-time-card dl>div{display:grid;grid-template-columns:85px 1fr;gap:10px;margin:7px 0}.qj-time-card dt{color:var(--qj-dim)}.qj-time-card dd{margin:0;overflow-wrap:anywhere}.qj-deadline-edit{border-top:1px solid var(--qj-border);padding-top:12px;display:flex;gap:7px;align-items:center;flex-wrap:wrap}.qj-deadline-edit>span{color:var(--qj-dim);font-size:10px}.qj-deadline-edit select{font-size:11px;width:auto}.qj-deadline-edit input{font-size:11px;width:auto;max-width:100%}.qj-time-card>small{color:var(--qj-dim);display:block;font-size:10px;margin-top:9px}.qj-time-warning{color:#e3aa85!important;font-size:11px}.qj-todo-item .qj-time-card{margin-left:0}
+@media(max-width:1250px){.qj-todo-open .qj-right{margin-right:0}}
+@media(max-width:580px){.qj-todo-drawer{position:fixed;top:0;bottom:0;width:100%;z-index:100}.qj-time-card{margin-left:0}.qj-node-row{flex-wrap:wrap}.qj-node-title{min-width:100px}.qj-todo-dialog{padding:16px}.qj-todo-toast{position:fixed}.qj-deadline-edit input{max-width:190px}}
+
 @media(max-width:850px){.qj-page{grid-template-columns:220px minmax(0,1fr)}.qj-right{padding:22px 18px}.qj-detail>.qj-node>.qj-node-row>.qj-node-title{font-size:20px}.qj-keyboard{line-height:2}}
 @media(max-width:580px){.qj-page{display:flex;flex-direction:column;height:auto;min-height:100%}.qj-left{max-height:260px;border-right:0;border-bottom:1px solid var(--qj-border);flex:none}.qj-new{margin:2px 10px}.qj-right{overflow:visible}.qj-command-head{flex-wrap:wrap}.qj-form{inset:12% 16px auto}.qj-create-dialog{inset:5vh 16px auto;padding:14px}.qj-children{margin-left:18px;padding-left:12px}.qj-row-actions{opacity:1}.qj-add-hover{visibility:visible}.qj-drag{opacity:1}}
 @media(pointer:coarse){.qj-icon{min-width:36px;min-height:40px}.qj-row-actions{opacity:1}.qj-add-hover{visibility:visible}.qj-command textarea,.qj-page input{font-size:16px}}
 `),
-        h("div",{className:"qj-left"},h("div",{className:"qj-tabs"},...["active","archived"].map(v=>h("button",{key:v,className:"qj-tab"+(tab===v?" is-on":""),onClick:()=>{endDrag();setTab(v);setSelected(null);setDetail(null);setCommandPlan(null);}},v==="active"?"进行中":"已归档"))),
+        h("div",{className:"qj-left"},h('button',{ref:todoTrigger,className:'qj-todo-trigger','aria-controls':'qj-todo-drawer','aria-pressed':todoOpen,onClick:()=>{endDrag();setTodoOpen(!todoOpen);}},h('span',null,'▤  快速 TODO'),h('span',{className:'qj-todo-count'},todos.filter(todo=>!todo.converted_at&&todo.status!=='completed').length)),h("div",{className:"qj-tabs"},...["active","archived"].map(v=>h("button",{key:v,className:"qj-tab"+(tab===v?" is-on":""),onClick:()=>{endDrag();setTab(v);setSelected(null);setDetail(null);setCommandPlan(null);}},v==="active"?"进行中":"已归档"))),
           h("div",{className:"qj-toolbar"},h("input",{placeholder:"搜索任务",value:search,onChange:e=>{endDrag();setSearch(e.target.value);}}),
             h("select",{value:filter,"aria-label":"筛选",onChange:e=>{endDrag();setFilter(e.target.value);}},...[["all","全部"],["open","未完成"],["completed","已完成"],["blocked","阻塞"],["P0","P0"],["P1","P1"],["P2","P2"]].map(([value,label])=>h("option",{key:value,value},label))),
             h("select",{value:sort,"aria-label":"排序",onChange:e=>{endDrag();setSort(e.target.value);}},...[["manual","－"],["priority","优先级"],["updated","最近更新"],["created","添加日期"]].map(([value,label])=>h("option",{key:value,value},label)))),
@@ -540,6 +661,8 @@ window.__ModuleLoader__.load({
             !readOnly?h("button",{className:"qj-add-bottom",disabled:busy,onClick:()=>add("objective",detail.id)},"＋ 添加目标"):null,
             h("details",{className:"qj-history"},h("summary",null,"历史记录 · "+trace.length),h("ul",{className:"qj-trace"},...trace.map(e=>h("li",{key:e.id},dateLabel(e.created_at)+" · "+e.summary+" ["+e.source+"]")))),
             h("div",{className:"qj-keyboard"},"双击标题编辑 · Enter 新增同级 · Tab 缩进 · Shift+Tab 升级")):h("div",{className:"qj-hint"},selected?"加载中…":"请选择任务")),
+        h(TodoDrawer,{open:todoOpen,todos,quests,currentId:selected,blockedId:previewing?selected:null,onClose:closeTodo,onMutation:todoChanged,onView:todoView,timeOpen,setTimeOpen,onNotice:todoNotice}),
+        notice?h('div',{className:'qj-todo-toast',role:'status'},h('span',null,notice.text),notice.todo?h('button',{className:'qj-todo-link',onClick:()=>todoView(notice.todo)},'查看'):null,notice.undo?h('button',{className:'qj-todo-link',onClick:undoTodo},'撤销'):null,h('button',{className:'qj-icon','aria-label':'关闭提示',onClick:()=>setNotice(null)},'×')):null,
         newOpen?h(NewQuestDialog,{onClose:()=>setNewOpen(false),onCreated:createdQuest}):null,
         form?h("form",{className:"qj-form",role:"dialog","aria-modal":true,"aria-label":form.label,onSubmit:async e=>{e.preventDefault();try {const changes=form.build(form.value.trim());if(!form.value.trim()){setError("内容不能为空");return;}if(await apply(changes))setForm(null);}catch(err){setError(err.message);}}},h("label",null,form.label),h("input",{autoFocus:true,value:form.value,onChange:e=>setForm({...form,value:e.target.value}),onKeyDown:e=>{if(e.key==="Escape")setForm(null);}}),h("button",{type:"submit",disabled:busy},"保存"),h("button",{type:"button",disabled:busy,onClick:()=>setForm(null)},"取消"),error?h("div",{role:"alert"},error):null):null);
     }

@@ -81,7 +81,7 @@ function defineTool(options) {
 }
 
 /**
- * Register the prompt section and the 11 `quest_*` tools.
+ * Register the prompt section and the `quest_*` tools.
  * @param {object} ctx - plugin context (with `tools` and `systemPrompt`).
  * @param {object} journal - the shared `QuestJournalService`.
  */
@@ -114,6 +114,14 @@ export function registerTools(ctx, journal) {
       return journal.listQuests({ includeArchived: args.include_archived === true });
     },
     presentCall: () => present("List quests", "read"),
+  }));
+
+  ctx.tools.register(defineTool({
+    name: "quest_list_todos",
+    description: "List quick TODOs, including completed and converted entries. Use exact IDs and quest_list/quest_get before converting; do not invent deadlines.",
+    parameters: {}, output: JSON_OUTPUT,
+    execute() { return journal.todos.list(); },
+    presentCall: () => present("List quick TODOs", "read"),
   }));
 
   ctx.tools.register(defineTool({
@@ -186,6 +194,8 @@ export function registerTools(ctx, journal) {
       title: { type: "string", description: "Replacement title." },
       description: { type: "string", description: "Replacement description." },
       priority: { type: "string", enum: ["P0", "P1", "P2"], description: "Task priority." },
+      due_date: { type: "json", description: "YYYY-MM-DD calendar day or null; mutually exclusive with due_at. Both null clears deadline." },
+      due_at: { type: "json", description: "Deadline epoch milliseconds or null. Only use explicit user-supplied dates." },
       status: { type: "string", enum: STATUS_ENUM, description: "Explicit completion state; \"completed\" only when the user said it is done." },
       is_blocked: { type: "boolean", description: "True to block, false to unblock." },
       blocked_reason: { type: "string", description: "Reason; only meaningful together with is_blocked: true." },
@@ -194,8 +204,10 @@ export function registerTools(ctx, journal) {
     execute(args) {
       return guard(() => {
         let node;
-        if (args.title !== undefined || args.description !== undefined || args.priority !== undefined) {
+        if (args.title !== undefined || args.description !== undefined || args.priority !== undefined || args.due_date !== undefined || args.due_at !== undefined) {
           node = journal.updateNode(args.node_type, args.node_id, {
+            ...(args.due_date !== undefined ? { due_date: args.due_date } : {}),
+            ...(args.due_at !== undefined ? { due_at: args.due_at } : {}),
             ...(args.priority !== undefined ? { priority: args.priority } : {}),
             ...(args.title !== undefined ? { title: args.title } : {}),
             ...(args.description !== undefined ? { description: args.description } : {}),
@@ -278,7 +290,7 @@ export function registerTools(ctx, journal) {
 
   ctx.tools.register(defineTool({
     name: "quest_apply_changes",
-    description: "Apply a batch of journal changes atomically. Each change is { op, ... }. Supported ops: create_quest, add_objective, add_step, update_node, set_completed, toggle_completed, set_blocked, add_attachment, update_attachment, remove_attachment, archive_quest, restore_quest, delete_node, move_node, reorder_node. reorder_node uses node_type/node_id/parent_id/target_id/position(before|after|end); end requires no target_id, quests have null parent_id, steps may move to another objective within the same quest. delete_node uses node_type/node_id and deletes descendants; move_node uses node_type/node_id/target_type/parent_id (objective ↔ step within the same quest). update_node accepts priority (P0/P1/P2) and sort_order.",
+    description: "Apply a batch of journal changes atomically. Each change is { op, ... }. Supported ops: create_quest, add_objective, add_step, update_node, set_completed, toggle_completed, set_blocked, add_attachment, update_attachment, remove_attachment, archive_quest, restore_quest, delete_node, move_node, reorder_node. reorder_node uses node_type/node_id/parent_id/target_id/position(before|after|end); end requires no target_id, quests have null parent_id, steps may move to another objective within the same quest. delete_node uses node_type/node_id and deletes descendants; move_node uses node_type/node_id/target_type/parent_id (objective ↔ step within the same quest). update_node accepts priority (P0/P1/P2), sort_order and deadlines: due_date (YYYY-MM-DD) or due_at (epoch ms), mutually exclusive; set both null to clear. Also supports create_todo (title, request_id, optional quest_id/objective_id and deadline), update_todo (todo_id, title/completed/deadline), convert_todo (todo_id, quest_id, optional objective_id), undo_todo_conversion (todo_id), delete_todo and restore_todo (todo_id). TODO conversion preserves status and times; never use guessed IDs.",
     parameters: {
       changes: { type: "json", required: true, description: "Array of change objects, applied atomically in order. New nodes may define ref (e.g. prd); later quest_id/objective_id/node_id/parent_id may use $prd." },
     },
